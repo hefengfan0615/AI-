@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, tiv1l-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>HeFengFan写作助手</title>
     <style>
         /* 全局强制黑体加粗、黑色、无倾斜、禁止水平溢出 */
@@ -216,8 +216,8 @@
 </div>
 
 <script>
-    const API_KEY = "fc80f21aacec4c598a72083e12b40b20.2dIFUpz4QwZu4ojg";
-    const API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions";
+    const API_KEY = "d84zcr0B1DaBRkjGFM6XP0pYED+gtG9/Kw9B5NGee4qWaMxB6obX1E1hhWAIS1Mc";
+    const API_URL = "https://ppmqpdkxgvas.ap-northeast-1.clawcloudrun.com/v1/chat/completions";
 
     const userInput = document.getElementById('user-input');
     const sendBtn = document.getElementById('send-btn');
@@ -361,7 +361,7 @@ B类：核心痛点——是"做不到"，而不是"不愿意"!
                     "Authorization": `Bearer ${API_KEY}`
                 },
                 body: JSON.stringify({
-                    model: "glm-4.7-flash",
+                    model: "deepseek-r1-search",
                     messages: [
                         { role: "system", content: SYSTEM_PROMPT },
                         { role: "user", content: prompt }
