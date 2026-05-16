@@ -574,7 +574,7 @@ def export_optimized_excel(order_file, output_path):
 class SalesAnalyzerGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("hefengfan山姆销售分析及导出工具")
+        self.root.title("hefengfan山姆销售分析")
         self.root.geometry("500x600")
         self.root.option_add('*Font', ('Consolas', 10))
 
