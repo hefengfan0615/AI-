@@ -462,6 +462,12 @@ def export_optimized_excel(order_file, output_path):
         if "Range1_销量" in grouped.columns:
             grouped = grouped.sort_values("Range1_销量", ascending=False)
 
+        # 先保留数值列，用于后面计算总和
+        numeric_cols_store = []
+        for col in grouped.columns:
+            if "毛利率" not in col and "门店名称" not in col and "类型" not in col and "省份" not in col and "ERP" not in col:
+                numeric_cols_store.append(col)
+
         # 格式化毛利率为百分比
         for col in grouped.columns:
             if "毛利率" in col:
@@ -513,6 +519,33 @@ def export_optimized_excel(order_file, output_path):
                 prov_rename[cols["oo"]] = f"Range{rn}_在途"
         prov_grouped.rename(columns=prov_rename, inplace=True)
 
+        # 先创建门店数据的完整副本，用于计算省份内最好最差门店
+        store_for_prov = grouped.copy()
+
+        # 为省份汇总添加最好/最差门店
+        prov_grouped["销量最好门店"] = ""
+        prov_grouped["销量最差门店"] = ""
+        
+        # 计算每个省份的最好和最差门店（基于 Range1_销量）
+        if "Range1_销量" in store_for_prov.columns:
+            for _, prov_row in prov_grouped.iterrows():
+                prov_name = prov_row["省份"]
+                # 筛选该省份的门店
+                prov_stores = store_for_prov[store_for_prov["省份"] == prov_name].copy()
+                if len(prov_stores) > 0:
+                    # 销量最好的门店
+                    best_store = prov_stores.loc[prov_stores["Range1_销量"].idxmax()]
+                    best_name = best_store["门店名称"] if best_store["门店名称"] else best_store["ERP"]
+                    best_units = best_store["Range1_销量"]
+                    # 销量最差的门店
+                    worst_store = prov_stores.loc[prov_stores["Range1_销量"].idxmin()]
+                    worst_name = worst_store["门店名称"] if worst_store["门店名称"] else worst_store["ERP"]
+                    worst_units = worst_store["Range1_销量"]
+                    
+                    # 更新到prov_grouped
+                    prov_grouped.loc[prov_grouped["省份"] == prov_name, "销量最好门店"] = f"{best_name} ({int(best_units)}瓶)"
+                    prov_grouped.loc[prov_grouped["省份"] == prov_name, "销量最差门店"] = f"{worst_name} ({int(worst_units)}瓶)"
+
         # 按 Range1_销量 降序
         if "Range1_销量" in prov_grouped.columns:
             prov_grouped = prov_grouped.sort_values("Range1_销量", ascending=False)
@@ -528,32 +561,105 @@ def export_optimized_excel(order_file, output_path):
             # 省份汇总 sheet
             prov_grouped.to_excel(writer, sheet_name='省份汇总', index=False)
 
-            # 格式化两个 sheet
-            for sheet_name in ['门店汇总', '省份汇总']:
-                ws = writer.sheets[sheet_name]
-                # 标题行加粗居中
-                for cell in ws[1]:
-                    cell.font = Font(bold=True)
-                    cell.alignment = Alignment(horizontal='center', vertical='center')
-                # 设置列宽和对齐
-                for col_idx, col_name in enumerate(ws.iter_cols(max_row=1, values_only=True), start=1):
-                    if col_name is None:
-                        continue
-                    # 计算最大宽度
+            # ---------------- 门店汇总 sheet 处理 ----------------
+            ws_store = writer.sheets['门店汇总']
+            
+            # 计算各列总和
+            sum_row = ws_store.max_row + 1
+            # 在第一列写入"总计"
+            ws_store.cell(row=sum_row, column=1, value="总计")
+            ws_store.cell(row=sum_row, column=1).font = Font(bold=True)
+            ws_store.cell(row=sum_row, column=1).alignment = Alignment(horizontal='left', vertical='center')
+            
+            # 为数值列计算总和
+            for col_idx, col_name in enumerate(grouped.columns, start=1):
+                if col_name in numeric_cols_store and col_name != "Club Nbr":
+                    # 计算该列总和（跳过表头）
                     col_letter = get_column_letter(col_idx)
-                    col_data = [cell.value for cell in ws[col_letter]]
-                    max_len = max((len(str(cell)) for cell in col_data if cell is not None), default=10)
-                    adjusted_width = min(max_len + 2, 50)
-                    ws.column_dimensions[col_letter].width = adjusted_width
-                    # 判断对齐
-                    if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', 'Nbr']):
-                        align = 'right'
-                    else:
-                        align = 'left'
-                    for row in range(2, ws.max_row + 1):
-                        cell = ws.cell(row=row, column=col_idx)
-                        cell.alignment = Alignment(horizontal=align, vertical='center')
+                    total = 0
+                    for row in range(2, ws_store.max_row):  # max_row此时还没加sum_row
+                        cell_val = ws_store.cell(row=row, column=col_idx).value
+                        if isinstance(cell_val, (int, float)):
+                            total += cell_val
+                    ws_store.cell(row=sum_row, column=col_idx, value=total)
+                    ws_store.cell(row=sum_row, column=col_idx).font = Font(bold=True)
+                    ws_store.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+            
+            # 门店汇总 sheet 格式化
+            # 标题行加粗居中
+            for cell in ws_store[1]:
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # 设置列宽和对齐
+            for col_idx, col_name in enumerate(grouped.columns, start=1):
+                col_letter = get_column_letter(col_idx)
+                # 计算最大宽度，考虑中文宽度
+                max_len = 0
+                for cell in ws_store[col_letter]:
+                    if cell.value is not None:
+                        cell_str = str(cell.value)
+                        # 计算显示宽度：中文字符宽度为2，其他为1
+                        width = 0
+                        for ch in cell_str:
+                            if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                                width += 2
+                            else:
+                                width += 1
+                        if width > max_len:
+                            max_len = width
+                # 设置列宽，最小10，最大60
+                adjusted_width = min(max(max_len + 2, 10), 60)
+                ws_store.column_dimensions[col_letter].width = adjusted_width
+                
+                # 判断对齐
+                if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', 'Nbr']):
+                    align = 'right'
+                else:
+                    align = 'left'
+                for row in range(2, ws_store.max_row + 1):
+                    cell = ws_store.cell(row=row, column=col_idx)
+                    cell.alignment = Alignment(horizontal=align, vertical='center')
 
+            # ---------------- 省份汇总 sheet 处理 ----------------
+            ws_prov = writer.sheets['省份汇总']
+            
+            # 省份汇总 sheet 格式化
+            # 标题行加粗居中
+            for cell in ws_prov[1]:
+                cell.font = Font(bold=True)
+                cell.alignment = Alignment(horizontal='center', vertical='center')
+            
+            # 设置列宽和对齐
+            for col_idx, col_name in enumerate(prov_grouped.columns, start=1):
+                col_letter = get_column_letter(col_idx)
+                # 计算最大宽度，考虑中文宽度
+                max_len = 0
+                for cell in ws_prov[col_letter]:
+                    if cell.value is not None:
+                        cell_str = str(cell.value)
+                        # 计算显示宽度：中文字符宽度为2，其他为1
+                        width = 0
+                        for ch in cell_str:
+                            if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                                width += 2
+                            else:
+                                width += 1
+                        if width > max_len:
+                            max_len = width
+                # 设置列宽，最小10，最大60
+                adjusted_width = min(max(max_len + 2, 10), 60)
+                ws_prov.column_dimensions[col_letter].width = adjusted_width
+                
+                # 判断对齐
+                if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途']):
+                    align = 'right'
+                else:
+                    align = 'left'
+                for row in range(2, ws_prov.max_row + 1):
+                    cell = ws_prov.cell(row=row, column=col_idx)
+                    cell.alignment = Alignment(horizontal=align, vertical='center')
+            
             # 时间范围 sheet
             range_dates, _ = parse_order_metadata(order_file)
             if range_dates:
@@ -563,9 +669,32 @@ def export_optimized_excel(order_file, output_path):
                 ])
                 meta_df.to_excel(writer, sheet_name="时间范围说明", index=False)
                 ws_meta = writer.sheets["时间范围说明"]
+                
+                # 时间范围 sheet 格式化
+                for cell in ws_meta[1]:
+                    cell.font = Font(bold=True)
+                    cell.alignment = Alignment(horizontal='center', vertical='center')
+                
                 for col_idx, col_name in enumerate(meta_df.columns, start=1):
-                    max_len = max(meta_df[col_name].astype(str).map(len).max(), len(col_name)) + 2
-                    ws_meta.column_dimensions[get_column_letter(col_idx)].width = max_len
+                    col_letter = get_column_letter(col_idx)
+                    max_len = 0
+                    for cell in ws_meta[col_letter]:
+                        if cell.value is not None:
+                            cell_str = str(cell.value)
+                            width = 0
+                            for ch in cell_str:
+                                if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                                    width += 2
+                                else:
+                                    width += 1
+                            if width > max_len:
+                                max_len = width
+                    adjusted_width = min(max(max_len + 2, 10), 60)
+                    ws_meta.column_dimensions[col_letter].width = adjusted_width
+                    
+                    for row in range(2, ws_meta.max_row + 1):
+                        cell = ws_meta.cell(row=row, column=col_idx)
+                        cell.alignment = Alignment(horizontal='center', vertical='center')
 
         return True, None
     except Exception as e:
