@@ -305,13 +305,11 @@ def analyze_sales(order_file):
         for s in store_list:
             prov = s["省份"]
             province_sales[prov] = province_sales.get(prov, 0) + s["Range1销量"]
-        prov_rows = [[prov, f"{sales:,}"] for prov, sales in sorted(province_sales.items(), key=lambda x: x[1], reverse=True)]
-        prov_table = create_table(["省份", "销量(瓶)"], prov_rows, col_align=["left", "right"], max_col_width=20)
-
-        table_headers = ["门店编号", "门店名称", "类型", "省份", "销量(瓶)"]
-        table_rows = [[s["Club Nbr"], s["门店名称"], s["类型"], s["省份"], f"{s['Range1销量']:,}"] for s in store_list]
-        col_align = ["left", "left", "left", "left", "right"]
-        store_table = create_table(table_headers, table_rows, col_align, max_col_width=40)
+        # 按销量从高到低排序
+        sorted_provinces = sorted(province_sales.items(), key=lambda x: x[1], reverse=True)
+        
+        # 取前五名门店
+        top5_stores = store_list[:5]
 
         result_lines = []
         result_lines.append("=" * 60)
@@ -330,11 +328,15 @@ def analyze_sales(order_file):
         result_lines.append(f"较去年同月份销量成长率：{month_growth:+.2f}% （对比 Range2 vs Range3）")
         result_lines.append(f"较去年同年份销量成长率：{year_growth:+.2f}% （对比 Range4 vs Range5）")
         result_lines.append("")
-        result_lines.append("【省份销售瓶数汇总】")
-        result_lines.append(prov_table)
+        result_lines.append("【前五名门店销量排名】")
+        result_lines.append("-" * 40)
+        for i, store in enumerate(top5_stores, 1):
+            result_lines.append(f"  第{i}名：{store['门店名称']} ({store['省份']}) - {store['Range1销量']:,} 瓶")
         result_lines.append("")
-        result_lines.append("【各门店销售明细（Range1）】")
-        result_lines.append(store_table)
+        result_lines.append("【省份销量排名】")
+        result_lines.append("-" * 40)
+        for i, (prov, sales) in enumerate(sorted_provinces, 1):
+            result_lines.append(f"  第{i}名：{prov} - {sales:,} 瓶")
         result_lines.append("")
         result_lines.append("【各时间段销量与周期】")
         all_ranges = sorted(set(total_units.keys()) | set(range_dates.keys()))
