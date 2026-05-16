@@ -43,21 +43,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install pandas openpyxl pyinstaller
 
-      - name: 打包山姆.exe (main.py)
+      - name: 打包 Sam.exe (main.py)
         run: |
-          pyinstaller --onefile --windowed --name 山姆 main.py
+          pyinstaller --onefile --windowed --name Sam main.py
 
-      - name: 打包沃尔玛.exe (main1.py)
+      - name: 打包 Walmart.exe (main1.py)
         run: |
-          pyinstaller --onefile --windowed --name 沃尔玛 main1.py
+          pyinstaller --onefile --windowed --name Walmart main1.py
 
       - name: 上传构建产物（供 Actions 页面下载）
         uses: actions/upload-artifact@v4
         with:
           name: EXE-files
           path: |
-            dist/山姆.exe
-            dist/沃尔玛.exe
+            dist/Sam.exe
+            dist/Walmart.exe
 
       - name: 发布 Release 并上传 exe
         if: success()
@@ -65,7 +65,7 @@ jobs:
         with:
           tag_name: ${{ github.event_name == 'push' && github.ref_name || format('v{0}', inputs.version) }}
           files: |
-            dist/山姆.exe
-            dist/沃尔玛.exe
+            dist/Sam.exe
+            dist/Walmart.exe
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
