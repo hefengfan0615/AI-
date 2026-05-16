@@ -1,5 +1,9 @@
 name: Build EXE and Release
 
+# 解决 Node.js 20 弃用警告，强制工作流内的 Actions 提前采用 Node 24 运行
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   push:
     tags:
@@ -13,7 +17,7 @@ on:
 
 jobs:
   build:
-    runs-on: windows-latest
+    runs-on: windows-latest   # 保持不变，6月中旬会自动平滑过渡到新系统
     permissions:
       contents: write         # 允许推送标签、创建 Release、上传文件
 
