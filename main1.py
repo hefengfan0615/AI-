@@ -389,7 +389,7 @@ class SalesAnalyzerGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("hefengfan沃尔玛销售")
-        self.root.geometry("950x750")
+        self.root.geometry("500x600")
         self.root.option_add('*Font', ('微软雅黑', 10))
 
         self.order_path = tk.StringVar()
