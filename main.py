@@ -350,7 +350,7 @@ def analyze_sales(order_file):
             else:
                 period = "时间范围未知"
             result_lines.append(f"  Range{rn}：{units:,.0f} 瓶  （{period}）")
-        return "\n\n".join(result_lines), None
+        return "\n".join(result_lines), None
     except Exception as e:
         return None, str(e)
 
