@@ -426,27 +426,27 @@ def export_optimized_excel(order_file, output_path):
                         return 0
                 return (current - previous) / previous * 100
             
-            # 销量成长率
+            # 销量成长率：Range2 vs Range3，Range4 vs Range5
             if 2 in col_map and 3 in col_map and "units" in col_map[2] and "units" in col_map[3]:
                 df["Range2-3_销量成长率"] = df.apply(
                     lambda row: growth_rate(row[col_map[2]["units"]], row[col_map[3]["units"]]), 
                     axis=1
                 )
-            if 3 in col_map and 4 in col_map and "units" in col_map[3] and "units" in col_map[4]:
-                df["Range3-4_销量成长率"] = df.apply(
-                    lambda row: growth_rate(row[col_map[3]["units"]], row[col_map[4]["units"]]), 
+            if 4 in col_map and 5 in col_map and "units" in col_map[4] and "units" in col_map[5]:
+                df["Range4-5_销量成长率"] = df.apply(
+                    lambda row: growth_rate(row[col_map[4]["units"]], row[col_map[5]["units"]]), 
                     axis=1
                 )
             
-            # 销售额成长率
+            # 销售额成长率：Range2 vs Range3，Range4 vs Range5
             if 2 in col_map and 3 in col_map and "sales" in col_map[2] and "sales" in col_map[3]:
                 df["Range2-3_销售额成长率"] = df.apply(
                     lambda row: growth_rate(row[col_map[2]["sales"]], row[col_map[3]["sales"]]), 
                     axis=1
                 )
-            if 3 in col_map and 4 in col_map and "sales" in col_map[3] and "sales" in col_map[4]:
-                df["Range3-4_销售额成长率"] = df.apply(
-                    lambda row: growth_rate(row[col_map[3]["sales"]], row[col_map[4]["sales"]]), 
+            if 4 in col_map and 5 in col_map and "sales" in col_map[4] and "sales" in col_map[5]:
+                df["Range4-5_销售额成长率"] = df.apply(
+                    lambda row: growth_rate(row[col_map[4]["sales"]], row[col_map[5]["sales"]]), 
                     axis=1
                 )
             
@@ -661,6 +661,9 @@ def export_optimized_excel(order_file, output_path):
             ws_store.cell(row=sum_row, column=1).font = Font(bold=True)
             ws_store.cell(row=sum_row, column=1).alignment = Alignment(horizontal='left', vertical='center')
             
+            # 保存总和值的字典，用于计算成长率
+            total_values = {}
+            
             # 为数值列计算总和
             for col_idx, col_name in enumerate(grouped.columns, start=1):
                 if col_name in numeric_cols_store and col_name != "Club Nbr" and "成长率" not in col_name:
@@ -674,6 +677,42 @@ def export_optimized_excel(order_file, output_path):
                     ws_store.cell(row=sum_row, column=col_idx, value=total)
                     ws_store.cell(row=sum_row, column=col_idx).font = Font(bold=True)
                     ws_store.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                    total_values[col_name] = total
+            
+            # 计算总计行的成长率
+            def calc_total_growth(current_col, prev_col):
+                if current_col in total_values and prev_col in total_values:
+                    current = total_values[current_col]
+                    prev = total_values[prev_col]
+                    if prev == 0:
+                        if current > 0:
+                            return "∞"
+                        else:
+                            return "0.00%"
+                    else:
+                        return f"{((current - prev) / prev * 100):.2f}%"
+                return ""
+            
+            # 查找成长率列并计算
+            for col_idx, col_name in enumerate(grouped.columns, start=1):
+                if "成长率" in col_name:
+                    if "Range2-3" in col_name:
+                        if "销量" in col_name:
+                            val = calc_total_growth("Range2_销量", "Range3_销量")
+                        else:
+                            val = calc_total_growth("Range2_销售额", "Range3_销售额")
+                    elif "Range4-5" in col_name:
+                        if "销量" in col_name:
+                            val = calc_total_growth("Range4_销量", "Range5_销量")
+                        else:
+                            val = calc_total_growth("Range4_销售额", "Range5_销售额")
+                    else:
+                        val = ""
+                    
+                    if val:
+                        ws_store.cell(row=sum_row, column=col_idx, value=val)
+                        ws_store.cell(row=sum_row, column=col_idx).font = Font(bold=True)
+                        ws_store.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
             
             # 格式化两个 sheet
             format_sheet(writer.sheets['门店汇总'], grouped)
