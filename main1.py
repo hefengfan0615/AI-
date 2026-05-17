@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 import warnings
 import locale
-from openpyxl.styles import Alignment, Font, numbers
+from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
 # ---------- 1. 抑制 OpenPyXL 警告 ----------
@@ -21,7 +21,6 @@ except:
         pass
 
 # ==================== 内置门店信息映射表 ====================
-# 根据您提供的数据构建（Store Nbr → 省份, 大区, 门店名称, 城市）
 STORE_INFO = {
     1009: ("吉林", "1区", "沃尔玛吉林长春前进广场店(总店)", "吉林"),
     2012: ("吉林", "1区", "沃尔玛吉林长春临河街店", "吉林"),
@@ -141,7 +140,7 @@ STORE_INFO = {
     1036: ("湖南", "4区", "沃尔玛湖南岳阳岳阳店", "岳阳"),
     1066: ("湖南", "4区", "沃尔玛湖南娄底春园店", "娄底"),
     1087: ("湖南", "4区", "沃尔玛湖南娄底大汉店", "娄底"),
-    2015: ("湖南", "5区", "沃尔玛湖南郴州郴州店", "郴州"),   # 原4区，根据数据修正
+    2015: ("湖南", "5区", "沃尔玛湖南郴州郴州店", "郴州"),
     2025: ("湖南", "4区", "沃尔玛湖南益阳益阳店", "益阳"),
     2149: ("湖南", "4区", "沃尔玛湖南邵阳邵阳店", "邵阳"),
     2410: ("湖南", "4区", "沃尔玛湖南株洲攸县攸县店", "株洲"),
@@ -391,7 +390,7 @@ STORE_INFO = {
     2354: ("四川", "6区", "沃尔玛四川眉山眉山店", "眉山"),
     104: ("广东", "5区", "沃尔玛广东广州广源店", "广州"),
     106: ("广东", "5区", "沃尔玛广东广州番禺店", "广州"),
-    108: ("广东", "5区", "108廣州廣雅", "广州"),
+    108: ("广东", "5区", "108广州广雅", "广州"),
     125: ("广东", "5区", "125广州黄石", "广州"),
     208: ("重庆", "6区", "沃尔玛重庆欣阳店(沙坪坝区)", "重庆"),
     209: ("四川", "6区", "209成都玉林", "成都"),
@@ -458,9 +457,68 @@ def get_store_info(club_nbr):
         return info
     return ("未知", "未知", "未知门店", "未知")
 
+# ==================== UPC 到品名映射表 ====================
+# 根据用户提供的列表整理（以字符串形式存储，保留前导零）
+UPC_TO_NAME = {
+    "0040020393821": "多力黄金三益葵花油5.68L",
+    "0040020891217": "多力黄金三益葵花油5L",
+    "0040020915837": "多力葵花籽油.4L",
+    "0690993101001": "多力葵花籽油.1.8L",
+    "0690993101005": "多力葵花籽油.5L",
+    "0690993121001": "多力花生油5L",
+    "0690993121009": "多力花生油900ml",
+    "0690993121007": "多力花生油400ml",
+    "0690993121011": "多力花生油4L",
+    "0690993121015": "O2O多力花生油5.68L",
+    "0690993124111": "多力葵花籽油.900ml",
+    "0690993124411": "多力葵花籽油.4L",
+    "0690993124517": "多力葵花籽油.5.68L",
+    "0690993124711": "多力黄金三益葵花油5L",
+    "0690993124717": "多力黄金三益葵籽油700ml",
+    "0690993124733": "多力黄金三益葵花油5.68L",
+    "0690993126415": "多力浓香菜籽油.5L",
+    "0690993126611": "多力特香压榨菜籽油5L",
+    "0690993146211": "多力芥花油5L",
+    "0690993150211": "多力压榨玉米油5L",
+    "0690993182001": "多力橄榄葵花油.5L",
+    "0690993170209": "多力黄金三益菜籽油",
+    "0040020600713": "多力葵花籽油.900ml",
+    "0040025047989": "多力花生油400ml",
+    "0040020196260": "多力葵花籽油.1.8L",
+    "0040020910552": "多力葵花籽油.5.68L",
+    "0040025069833": "多力黄金三益菜籽油",
+    "0040020911547": "多力葵花籽油.5L",
+    "0040020759839": "多力压榨玉米油5L",
+    "0690993121003": "多力花生油1.8L",
+    "0040020064290": "多力花生油1.8L",
+    "0690993170260": "多力黄金三益玉米油700mL",
+    "0690993170293": "多力浓香葵花籽油5L",
+    "0040020094453": "多力花生油5L",
+    "0040025245655": "多力醇香花生油4.8L",
+    "0690993170328": "多力醇香花生油4.8L",
+    "0040025215388": "多力食用油大单券.",
+    "0040025243032": "多力食用油大单券.",
+    "0040025249910": "多力食用油大单券.",
+    "0040025256998": "多力食用油大单券.",
+    "0240000559772": "多力食用油大单券.",
+    "0240000563321": "多力食用油大单券.",
+    "0240000563902": "多力食用油大单券.",
+    "0240000566020": "多力食用油大单券.",
+}
+
+def make_item_name(row):
+    """根据 UPC 和 Item Desc 1 生成品名，优先使用映射表"""
+    upc = row["UPC"]
+    if upc in UPC_TO_NAME:
+        return f"{UPC_TO_NAME[upc]} ({upc})"
+    desc = row.get("Item Desc 1", "")
+    if pd.notna(desc) and desc:
+        return f"{desc} ({upc})"
+    return f"商品{upc}"
+
 # ==================== 解析订单文件 ====================
 def parse_order_metadata(filepath):
-    """读取表头行，识别各 Range 的 Qty 和 Sales 列名，以及时间范围"""
+    """读取表头行，识别各 Range 的 Qty、Sales、库存、在途列名，以及时间范围"""
     df_raw = pd.read_excel(filepath, header=None, nrows=100, dtype=str)
     range_dates = {}
     header_row = None
@@ -498,13 +556,15 @@ def parse_order_metadata(filepath):
     # 识别销量、销售额、库存、在途列
     range_qty_cols = {}
     range_sales_cols = {}
-    range_oh_cols = {}  # 库存
-    range_oo_cols = {}  # 在途
+    range_oh_cols = {}     # 库存 (Curr Str On Hand Qty)
+    range_transit_cols = {} # 在途 (Curr Str In Transit Qty)
+    range_oo_cols = {}      # 在订量 (Curr Str On Order Qty) – 可选
     for col in df_full.columns:
         qty_match = re.match(r"Range\s*(\d+)\s*POS\s*Qty", col, re.IGNORECASE)
         sales_match = re.match(r"Range\s*(\d+)\s*POS\s*Sales", col, re.IGNORECASE)
-        oh_match = re.match(r"Range\s*(\d+)\s*(?:Current\s*)?On-Hand\s*Qty", col, re.IGNORECASE)
-        oo_match = re.match(r"Range\s*(\d+)\s*(?:Current\s*)?On-Order\s*Qty", col, re.IGNORECASE)
+        oh_match = re.match(r"Range\s*(\d+)\s*Curr\s+Str\s+On\s+Hand\s+Qty", col, re.IGNORECASE)
+        transit_match = re.match(r"Range\s*(\d+)\s*Curr\s+Str\s+In\s+Transit\s+Qty", col, re.IGNORECASE)
+        oo_match = re.match(r"Range\s*(\d+)\s*Curr\s+Str\s+On\s+Order\s+Qty", col, re.IGNORECASE)
         if qty_match:
             rn = int(qty_match.group(1))
             range_qty_cols[rn] = col
@@ -514,6 +574,9 @@ def parse_order_metadata(filepath):
         if oh_match:
             rn = int(oh_match.group(1))
             range_oh_cols[rn] = col
+        if transit_match:
+            rn = int(transit_match.group(1))
+            range_transit_cols[rn] = col
         if oo_match:
             rn = int(oo_match.group(1))
             range_oo_cols[rn] = col
@@ -521,9 +584,9 @@ def parse_order_metadata(filepath):
         raise ValueError("未找到 Range N POS Qty 列（销量）")
     if not range_sales_cols:
         raise ValueError("未找到 Range N POS Sales 列（销额）")
-    return range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols
+    return range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols
 
-def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols):
+def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols):
     """读取数据并返回三个聚合 DataFrame：门店、品项、省份（原始分组）"""
     df = pd.read_excel(filepath, header=header_row, dtype=str)
     # 必要列检查
@@ -546,6 +609,9 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols, r
             if rn in range_oh_cols:
                 col = range_oh_cols[rn]
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            if rn in range_transit_cols:
+                col = range_transit_cols[rn]
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
             if rn in range_oo_cols:
                 col = range_oo_cols[rn]
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
@@ -557,10 +623,11 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols, r
             item_agg[range_qty_cols[rn]] = "sum"
         if rn in range_sales_cols:
             item_agg[range_sales_cols[rn]] = "sum"
-        # 只有Range1添加库存和在途
         if rn == 1:
             if rn in range_oh_cols:
                 item_agg[range_oh_cols[rn]] = "sum"
+            if rn in range_transit_cols:
+                item_agg[range_transit_cols[rn]] = "sum"
             if rn in range_oo_cols:
                 item_agg[range_oo_cols[rn]] = "sum"
     if "Item Desc 1" in df.columns:
@@ -586,12 +653,10 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols, r
     prov_group = store_group.groupby("省份", as_index=False).agg(
         {col: "sum" for col in store_agg.keys()}
     )
+    prov_df = prov_group.copy()   # 创建副本
 
-    # --- 关键修正：显式创建副本，消除 SettingWithCopyWarning ---
-    prov_df = prov_group.copy()   # <--- 添加 .copy()
+    return all_range_nums, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols, item_group, store_group, prov_df, df
 
-    return all_range_nums, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols, item_group, store_group, prov_df, df
-    
 # ==================== 成长率计算 ====================
 def growth_rate(current, previous):
     if previous == 0:
@@ -601,9 +666,9 @@ def growth_rate(current, previous):
 # ==================== 导出 Excel（含品项sheet） ====================
 def export_optimized_excel(order_file, output_path):
     try:
-        range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols = parse_order_metadata(order_file)
-        all_ranges, qty_cols, sales_cols, oh_cols, oo_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
-            order_file, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols
+        range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols = parse_order_metadata(order_file)
+        all_ranges, qty_cols, sales_cols, oh_cols, transit_cols, oo_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
+            order_file, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols
         )
 
         # ------------------ 统一重命名列为中文 ------------------
@@ -617,37 +682,31 @@ def export_optimized_excel(order_file, output_path):
             if rn == 1:
                 if rn in oh_cols:
                     rename_dict[oh_cols[rn]] = f"Range{rn}_库存"
+                if rn in transit_cols:
+                    rename_dict[transit_cols[rn]] = f"Range{rn}_在途"
                 if rn in oo_cols:
-                    rename_dict[oo_cols[rn]] = f"Range{rn}_在途"
+                    rename_dict[oo_cols[rn]] = f"Range{rn}_在订"
         item_df.rename(columns=rename_dict, inplace=True)
         store_df.rename(columns=rename_dict, inplace=True)
         prov_df.rename(columns=rename_dict, inplace=True)
 
-        # ------------------ 品项汇总表 ------------------
-        def make_item_name(row):
-            upc = row["UPC"]
-            desc = row.get("Item Desc 1", "")
-            if pd.notna(desc) and desc:
-                return f"{desc} ({upc})"
-            else:
-                return f"商品{upc}"
+        # ------------------ 品项汇总表（使用映射表生成品名） ------------------
         item_df["品名"] = item_df.apply(make_item_name, axis=1)
         base_item_cols = ["品名", "UPC", "Item Desc 1"]
         item_range_cols = [c for c in item_df.columns if c.startswith("Range") and "成长率" not in c]
-        # 自定义排序：先按 Range数字，再按指标类型（销量 < 销售额 < 库存 < 在途）
+        # 自定义排序：先按 Range数字，再按指标类型
         def sort_key(x):
             m = re.search(r"Range(\d+)_(.*)", x)
             if m:
                 rn = int(m.group(1))
                 metric = m.group(2)
-                metric_order = {"销量": 1, "销售额": 2, "库存": 3, "在途": 4}
+                metric_order = {"销量": 1, "销售额": 2, "库存": 3, "在途": 4, "在订": 5}
                 return (rn, metric_order.get(metric, 99))
             return (999, x)
         item_range_cols.sort(key=sort_key)
         item_df = item_df[base_item_cols + item_range_cols]
 
         # ------------------ 门店汇总表 ------------------
-        # 添加成长率（销量 & 销售额）
         for df in [store_df, prov_df]:
             for prefix in ["销量", "销售额"]:
                 if f"Range2_{prefix}" in df.columns and f"Range3_{prefix}" in df.columns:
@@ -657,7 +716,6 @@ def export_optimized_excel(order_file, output_path):
                     df[f"Range4-5_{prefix}成长率"] = df.apply(
                         lambda row: growth_rate(row[f"Range4_{prefix}"], row[f"Range5_{prefix}"]), axis=1)
 
-        # 门店信息列
         store_base = ["Store Nbr", "门店名称", "省份", "大区", "城市"]
         store_range_cols = [c for c in store_df.columns if c.startswith("Range") and "成长率" not in c]
         store_range_cols.sort(key=sort_key)
@@ -666,7 +724,6 @@ def export_optimized_excel(order_file, output_path):
         store_df.sort_values("Range1_销量", ascending=False, inplace=True)
 
         # ------------------ 省份汇总表 ------------------
-        # 添加省份下最好/最差门店（基于 Range1 销量）
         if "Range1_销量" in store_df.columns:
             prov_best = {}
             prov_worst = {}
@@ -685,8 +742,6 @@ def export_optimized_excel(order_file, output_path):
         prov_growth_cols = [c for c in prov_df.columns if "成长率" in c]
         prov_extra = ["销量最好门店", "销量最差门店"]
         prov_df = prov_df[prov_base + prov_range_cols + prov_growth_cols + prov_extra]
-
-        # ---------- 关键修正：改用非原位排序，避免 SettingWithCopyWarning ----------
         prov_df = prov_df.sort_values("Range1_销量", ascending=False)
 
         # ------------------ 写入 Excel ------------------
@@ -705,11 +760,9 @@ def export_optimized_excel(order_file, output_path):
                         break
                     else:
                         base_cols_end = i + 1
-                # 第一行基础列留空
                 for col_idx in range(1, base_cols_end + 1):
                     ws.cell(row=start_row, column=col_idx, value="")
                     ws.cell(row=start_row, column=col_idx).font = Font(bold=True)
-                # 收集 Range 数字
                 range_nums = set()
                 for col in df.columns[base_cols_end:]:
                     if col.startswith("Range") and "成长率" not in col:
@@ -725,21 +778,18 @@ def export_optimized_excel(order_file, output_path):
                         if col.startswith(f"Range{rn}_"):
                             current_col += 1
                     col_groups[f"Range{rn}"] = (start_col, current_col - 1)
-                # 成长率分组
                 growth_start = current_col
                 for col in df.columns[base_cols_end:]:
                     if "成长率" in col:
                         current_col += 1
                 if growth_start < current_col:
                     col_groups["成长率"] = (growth_start, current_col - 1)
-                # 额外列（销量最好/最差门店）
                 extra_start = current_col
                 for col in df.columns[base_cols_end:]:
                     if col in ["销量最好门店", "销量最差门店"]:
                         current_col += 1
                 if extra_start < current_col:
                     col_groups["门店表现"] = (extra_start, current_col - 1)
-                # 合并单元格并写入分组名
                 for group_name, (start, end) in col_groups.items():
                     if start == end:
                         ws.cell(row=start_row, column=start, value=group_name)
@@ -752,14 +802,11 @@ def export_optimized_excel(order_file, output_path):
                         ws.cell(row=start_row, column=start).alignment = Alignment(horizontal='center', vertical='center')
 
             def format_sheet(ws, df, sheet_name):
-                # 写双行表头
                 create_multi_header(ws, df, start_row=1)
-                # 第二行列名加粗居中
                 for col_idx, col_name in enumerate(df.columns, start=1):
                     cell = ws.cell(row=2, column=col_idx, value=col_name)
                     cell.font = Font(bold=True)
                     cell.alignment = Alignment(horizontal='center', vertical='center')
-                # 列宽 & 对齐
                 for col_idx, col_name in enumerate(df.columns, start=1):
                     col_letter = get_column_letter(col_idx)
                     max_len = 0
@@ -777,8 +824,7 @@ def export_optimized_excel(order_file, output_path):
                                 max_len = width
                     adjusted_width = min(max(max_len + 2, 8), 50)
                     ws.column_dimensions[col_letter].width = adjusted_width
-                    # 数值右对齐（包括库存、在途）
-                    align = 'right' if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '成长率', 'Nbr']) else 'left'
+                    align = 'right' if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '在订', '成长率', 'Nbr']) else 'left'
                     for row in range(3, ws.max_row + 1):
                         cell = ws.cell(row=row, column=col_idx)
                         cell.alignment = Alignment(horizontal=align, vertical='center')
@@ -787,16 +833,14 @@ def export_optimized_excel(order_file, output_path):
                                 if cell.value == float('inf'):
                                     cell.value = "∞"
                                 else:
-                                    cell.value = cell.value / 100  # 转换为0-1范围的小数
-                                    cell.number_format = '0.00%'  # 设置为百分比格式
+                                    cell.value = cell.value / 100
+                                    cell.number_format = '0.00%'
 
-            # 格式化三个 sheet
             for sheet_name, df in [('品项汇总', item_df), ('门店汇总', store_df), ('省份汇总', prov_df)]:
                 ws = writer.sheets[sheet_name]
                 format_sheet(ws, df, sheet_name)
 
-                # 添加总计行（所有 sheet）
-                base_cols = []
+                # 添加总计行
                 if sheet_name == '品项汇总':
                     base_cols = ["品名", "UPC", "Item Desc 1"]
                 elif sheet_name == '门店汇总':
@@ -804,7 +848,6 @@ def export_optimized_excel(order_file, output_path):
                 else:
                     base_cols = ["省份"]
                 numeric_cols = [c for c in df.columns if c not in base_cols and "成长率" not in c and c not in ["销量最好门店", "销量最差门店"]]
-                # 重要：先记录数据行数，再添加总计行
                 data_row_count = ws.max_row
                 sum_row = data_row_count + 1
                 ws.cell(row=sum_row, column=1, value="总计")
@@ -812,23 +855,12 @@ def export_optimized_excel(order_file, output_path):
                 total_col_indices = {}
                 for col_idx, col_name in enumerate(df.columns, start=1):
                     if col_name in numeric_cols:
-                        # 使用 Excel SUM 公式
                         col_letter = get_column_letter(col_idx)
                         formula = f"=SUM({col_letter}3:{col_letter}{data_row_count})"
                         ws.cell(row=sum_row, column=col_idx, value=formula)
                         ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
                         ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
                         total_col_indices[col_name] = col_idx
-                    # 品项汇总的数值列右对齐，其他左对齐
-                    if sheet_name == '品项汇总':
-                        for row in range(3, data_row_count + 1):
-                            cell = ws.cell(row=row, column=col_idx)
-                            # 数值类列右对齐
-                            if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '成长率', 'Nbr']):
-                                cell.alignment = Alignment(horizontal='right', vertical='center')
-                            else:
-                                cell.alignment = Alignment(horizontal='left', vertical='center')
-                # 计算成长率总计（也使用公式）
                 for col_idx, col_name in enumerate(df.columns, start=1):
                     if "成长率" in col_name:
                         if "Range2-3" in col_name:
@@ -850,16 +882,14 @@ def export_optimized_excel(order_file, output_path):
                         if cur_col_idx and prev_col_idx:
                             cur_letter = get_column_letter(cur_col_idx)
                             prev_letter = get_column_letter(prev_col_idx)
-                            # 使用Excel公式并设置单元格格式为百分比
                             formula = f'=IF({prev_letter}{sum_row}=0,IF({cur_letter}{sum_row}>0,"∞",0),(({cur_letter}{sum_row}-{prev_letter}{sum_row})/{prev_letter}{sum_row}))'
                             cell = ws.cell(row=sum_row, column=col_idx, value=formula)
                             cell.font = Font(bold=True)
                             cell.alignment = Alignment(horizontal='right', vertical='center')
-                            # 设置百分比格式，两位小数
                             if cell.value != "∞":
                                 cell.number_format = '0.00%'
 
-            # ------------------ 时间范围说明 Sheet ------------------
+            # 时间范围说明 Sheet
             if range_dates:
                 meta_df = pd.DataFrame([
                     {"时间段": f"Range{rn}", "开始日期": info["start"].strftime("%Y-%m-%d"), "结束日期": info["end"].strftime("%Y-%m-%d")}
@@ -892,45 +922,34 @@ def export_optimized_excel(order_file, output_path):
         return True, None
     except Exception as e:
         return False, str(e)
-        
+
 # ==================== 文本分析（控制台输出） ====================
 def analyze_sales(order_file):
     try:
-        range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols = parse_order_metadata(order_file)
-        all_ranges, qty_cols, sales_cols, oh_cols, oo_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
-            order_file, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols
+        range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols = parse_order_metadata(order_file)
+        all_ranges, qty_cols, sales_cols, oh_cols, transit_cols, oo_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
+            order_file, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_transit_cols, range_oo_cols
         )
 
-        # ---------- 重命名 item_df 的列为中文（与导出 Excel 保持一致） ----------
+        # 重命名
         rename_dict = {}
         for rn in all_ranges:
             if rn in qty_cols:
                 rename_dict[qty_cols[rn]] = f"Range{rn}_销量"
             if rn in sales_cols:
                 rename_dict[sales_cols[rn]] = f"Range{rn}_销售额"
-            # 只有Range1有库存和在途
             if rn == 1:
                 if rn in oh_cols:
                     rename_dict[oh_cols[rn]] = f"Range{rn}_库存"
-                if rn in oo_cols:
-                    rename_dict[oo_cols[rn]] = f"Range{rn}_在途"
+                if rn in transit_cols:
+                    rename_dict[transit_cols[rn]] = f"Range{rn}_在途"
         item_df.rename(columns=rename_dict, inplace=True)
-
-        # 添加品名（合并 Item Desc 1 和 UPC）
-        def make_item_name(row):
-            upc = row["UPC"]
-            desc = row.get("Item Desc 1", "")
-            if pd.notna(desc) and desc:
-                return f"{desc} ({upc})"
-            else:
-                return f"商品{upc}"
         item_df["品名"] = item_df.apply(make_item_name, axis=1)
 
-        # ---------- 构建文本表格（销量 / 销额） ----------
+        # 构建文本表格
         def build_text_table(df, metric_type):
             is_qty = (metric_type == 'Qty')
             prefix = "销量" if is_qty else "销售额"
-            # 找出所有 RangeX_销量/销售额 列
             col_map = {}
             for rn in all_ranges:
                 col_name = f"Range{rn}_{prefix}"
@@ -978,7 +997,6 @@ def analyze_sales(order_file):
                     line.append(f"{g:.1f}%" if g != float('inf') else "∞")
                 rows.append(line)
 
-            # 总计行
             total_line = ["【总计】", ""]
             for rn in all_ranges:
                 if rn in col_map:
