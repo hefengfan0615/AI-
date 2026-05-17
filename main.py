@@ -512,9 +512,9 @@ def export_optimized_excel(order_file, output_path):
             if m:
                 rn = int(m.group(1))
                 metric = m.group(2)
-                # Range1 特殊顺序：库存、在途、在订紧挨着显示
+                # Range1 顺序：销量→销售额→库存→在途→在订 (45123)
                 if rn == 1:
-                    order = {"库存": 1, "在途": 2, "在订": 3, "销量": 4, "销售额": 5}
+                    order = {"销量": 1, "销售额": 2, "库存": 3, "在途": 4, "在订": 5}
                 else:
                     order = {"销量": 1, "销售额": 2}
                 return (rn, order.get(metric, 99))
