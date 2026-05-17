@@ -819,10 +819,15 @@ def export_optimized_excel(order_file, output_path):
                         ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
                         ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
                         total_col_indices[col_name] = col_idx
-                    # 品项汇总的所有列左对齐
+                    # 品项汇总的数值列右对齐，其他左对齐
                     if sheet_name == '品项汇总':
                         for row in range(3, data_row_count + 1):
-                            ws.cell(row=row, column=col_idx).alignment = Alignment(horizontal='left', vertical='center')
+                            cell = ws.cell(row=row, column=col_idx)
+                            # 数值类列右对齐
+                            if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '成长率', 'Nbr']):
+                                cell.alignment = Alignment(horizontal='right', vertical='center')
+                            else:
+                                cell.alignment = Alignment(horizontal='left', vertical='center')
                 # 计算成长率总计（也使用公式）
                 for col_idx, col_name in enumerate(df.columns, start=1):
                     if "成长率" in col_name:
