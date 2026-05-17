@@ -495,25 +495,35 @@ def parse_order_metadata(filepath):
         raise ValueError("未找到数据表头行（缺少 UPC 或 Store Nbr）")
     # 读取全表
     df_full = pd.read_excel(filepath, header=header_row, dtype=str)
-    # 识别销量和销售额列
+    # 识别销量、销售额、库存、在途列
     range_qty_cols = {}
     range_sales_cols = {}
+    range_oh_cols = {}  # 库存
+    range_oo_cols = {}  # 在途
     for col in df_full.columns:
         qty_match = re.match(r"Range\s*(\d+)\s*POS\s*Qty", col, re.IGNORECASE)
         sales_match = re.match(r"Range\s*(\d+)\s*POS\s*Sales", col, re.IGNORECASE)
+        oh_match = re.match(r"Range\s*(\d+)\s*(?:Current\s*)?On-Hand\s*Qty", col, re.IGNORECASE)
+        oo_match = re.match(r"Range\s*(\d+)\s*(?:Current\s*)?On-Order\s*Qty", col, re.IGNORECASE)
         if qty_match:
             rn = int(qty_match.group(1))
             range_qty_cols[rn] = col
         if sales_match:
             rn = int(sales_match.group(1))
             range_sales_cols[rn] = col
+        if oh_match:
+            rn = int(oh_match.group(1))
+            range_oh_cols[rn] = col
+        if oo_match:
+            rn = int(oo_match.group(1))
+            range_oo_cols[rn] = col
     if not range_qty_cols:
         raise ValueError("未找到 Range N POS Qty 列（销量）")
     if not range_sales_cols:
         raise ValueError("未找到 Range N POS Sales 列（销额）")
-    return range_dates, header_row, range_qty_cols, range_sales_cols
+    return range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols
 
-def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols):
+def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols):
     """读取数据并返回三个聚合 DataFrame：门店、品项、省份（原始分组）"""
     df = pd.read_excel(filepath, header=header_row, dtype=str)
     # 必要列检查
@@ -522,7 +532,7 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols):
     df["UPC"] = df["UPC"].astype(str).str.strip()
     df["Store Nbr"] = df["Store Nbr"].astype(str).str.extract(r"(\d+)")[0].astype(float).astype(int)
 
-    # 处理销量和销售额列
+    # 处理销量、销售额、库存和在途列
     all_range_nums = sorted(set(list(range_qty_cols.keys()) + list(range_sales_cols.keys())))
     for rn in all_range_nums:
         if rn in range_qty_cols:
@@ -531,6 +541,14 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols):
         if rn in range_sales_cols:
             col = range_sales_cols[rn]
             df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        # 只有Range1才处理库存和在途
+        if rn == 1:
+            if rn in range_oh_cols:
+                col = range_oh_cols[rn]
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+            if rn in range_oo_cols:
+                col = range_oo_cols[rn]
+                df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
 
     # 品项聚合（按 UPC）
     item_agg = {}
@@ -539,6 +557,12 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols):
             item_agg[range_qty_cols[rn]] = "sum"
         if rn in range_sales_cols:
             item_agg[range_sales_cols[rn]] = "sum"
+        # 只有Range1添加库存和在途
+        if rn == 1:
+            if rn in range_oh_cols:
+                item_agg[range_oh_cols[rn]] = "sum"
+            if rn in range_oo_cols:
+                item_agg[range_oo_cols[rn]] = "sum"
     if "Item Desc 1" in df.columns:
         item_group = df.groupby("UPC", as_index=False).agg(
             {**item_agg, "Item Desc 1": "first"}
@@ -566,7 +590,7 @@ def load_and_aggregate(filepath, header_row, range_qty_cols, range_sales_cols):
     # --- 关键修正：显式创建副本，消除 SettingWithCopyWarning ---
     prov_df = prov_group.copy()   # <--- 添加 .copy()
 
-    return all_range_nums, range_qty_cols, range_sales_cols, item_group, store_group, prov_df, df
+    return all_range_nums, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols, item_group, store_group, prov_df, df
     
 # ==================== 成长率计算 ====================
 def growth_rate(current, previous):
@@ -577,9 +601,9 @@ def growth_rate(current, previous):
 # ==================== 导出 Excel（含品项sheet） ====================
 def export_optimized_excel(order_file, output_path):
     try:
-        range_dates, header_row, range_qty_cols, range_sales_cols = parse_order_metadata(order_file)
-        all_ranges, qty_cols, sales_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
-            order_file, header_row, range_qty_cols, range_sales_cols
+        range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols = parse_order_metadata(order_file)
+        all_ranges, qty_cols, sales_cols, oh_cols, oo_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
+            order_file, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols
         )
 
         # ------------------ 统一重命名列为中文 ------------------
@@ -589,6 +613,12 @@ def export_optimized_excel(order_file, output_path):
                 rename_dict[qty_cols[rn]] = f"Range{rn}_销量"
             if rn in sales_cols:
                 rename_dict[sales_cols[rn]] = f"Range{rn}_销售额"
+            # 只有Range1有库存和在途
+            if rn == 1:
+                if rn in oh_cols:
+                    rename_dict[oh_cols[rn]] = f"Range{rn}_库存"
+                if rn in oo_cols:
+                    rename_dict[oo_cols[rn]] = f"Range{rn}_在途"
         item_df.rename(columns=rename_dict, inplace=True)
         store_df.rename(columns=rename_dict, inplace=True)
         prov_df.rename(columns=rename_dict, inplace=True)
@@ -603,8 +633,17 @@ def export_optimized_excel(order_file, output_path):
                 return f"商品{upc}"
         item_df["品名"] = item_df.apply(make_item_name, axis=1)
         base_item_cols = ["品名", "UPC", "Item Desc 1"]
-        item_range_cols = [c for c in item_df.columns if c.startswith("Range")]
-        item_range_cols.sort(key=lambda x: (int(re.search(r"Range(\d+)", x).group(1)), x.split("_")[1]))
+        item_range_cols = [c for c in item_df.columns if c.startswith("Range") and "成长率" not in c]
+        # 自定义排序：先按 Range数字，再按指标类型（销量 < 销售额 < 库存 < 在途）
+        def sort_key(x):
+            m = re.search(r"Range(\d+)_(.*)", x)
+            if m:
+                rn = int(m.group(1))
+                metric = m.group(2)
+                metric_order = {"销量": 1, "销售额": 2, "库存": 3, "在途": 4}
+                return (rn, metric_order.get(metric, 99))
+            return (999, x)
+        item_range_cols.sort(key=sort_key)
         item_df = item_df[base_item_cols + item_range_cols]
 
         # ------------------ 门店汇总表 ------------------
@@ -620,8 +659,8 @@ def export_optimized_excel(order_file, output_path):
 
         # 门店信息列
         store_base = ["Store Nbr", "门店名称", "省份", "大区", "城市"]
-        store_range_cols = [c for c in store_df.columns if c.startswith("Range")]
-        store_range_cols.sort(key=lambda x: (int(re.search(r"Range(\d+)", x).group(1)), x.split("_")[1]))
+        store_range_cols = [c for c in store_df.columns if c.startswith("Range") and "成长率" not in c]
+        store_range_cols.sort(key=sort_key)
         store_growth_cols = [c for c in store_df.columns if "成长率" in c]
         store_df = store_df[store_base + store_range_cols + store_growth_cols]
         store_df.sort_values("Range1_销量", ascending=False, inplace=True)
@@ -641,8 +680,8 @@ def export_optimized_excel(order_file, output_path):
             prov_df["销量最差门店"] = prov_df["省份"].map(prov_worst).fillna("")
 
         prov_base = ["省份"]
-        prov_range_cols = [c for c in prov_df.columns if c.startswith("Range")]
-        prov_range_cols.sort(key=lambda x: (int(re.search(r"Range(\d+)", x).group(1)), x.split("_")[1]))
+        prov_range_cols = [c for c in prov_df.columns if c.startswith("Range") and "成长率" not in c]
+        prov_range_cols.sort(key=sort_key)
         prov_growth_cols = [c for c in prov_df.columns if "成长率" in c]
         prov_extra = ["销量最好门店", "销量最差门店"]
         prov_df = prov_df[prov_base + prov_range_cols + prov_growth_cols + prov_extra]
@@ -738,8 +777,8 @@ def export_optimized_excel(order_file, output_path):
                                 max_len = width
                     adjusted_width = min(max(max_len + 2, 8), 50)
                     ws.column_dimensions[col_letter].width = adjusted_width
-                    # 数值右对齐
-                    align = 'right' if any(kw in col_name for kw in ['销量', '销售额', '成长率', 'Nbr']) else 'left'
+                    # 数值右对齐（包括库存、在途）
+                    align = 'right' if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '成长率', 'Nbr']) else 'left'
                     for row in range(3, ws.max_row + 1):
                         cell = ws.cell(row=row, column=col_idx)
                         cell.alignment = Alignment(horizontal=align, vertical='center')
@@ -847,9 +886,9 @@ def export_optimized_excel(order_file, output_path):
 # ==================== 文本分析（控制台输出） ====================
 def analyze_sales(order_file):
     try:
-        range_dates, header_row, range_qty_cols, range_sales_cols = parse_order_metadata(order_file)
-        all_ranges, qty_cols, sales_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
-            order_file, header_row, range_qty_cols, range_sales_cols
+        range_dates, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols = parse_order_metadata(order_file)
+        all_ranges, qty_cols, sales_cols, oh_cols, oo_cols, item_df, store_df, prov_df, _ = load_and_aggregate(
+            order_file, header_row, range_qty_cols, range_sales_cols, range_oh_cols, range_oo_cols
         )
 
         # ---------- 重命名 item_df 的列为中文（与导出 Excel 保持一致） ----------
@@ -859,6 +898,12 @@ def analyze_sales(order_file):
                 rename_dict[qty_cols[rn]] = f"Range{rn}_销量"
             if rn in sales_cols:
                 rename_dict[sales_cols[rn]] = f"Range{rn}_销售额"
+            # 只有Range1有库存和在途
+            if rn == 1:
+                if rn in oh_cols:
+                    rename_dict[oh_cols[rn]] = f"Range{rn}_库存"
+                if rn in oo_cols:
+                    rename_dict[oo_cols[rn]] = f"Range{rn}_在途"
         item_df.rename(columns=rename_dict, inplace=True)
 
         # 添加品名（合并 Item Desc 1 和 UPC）
