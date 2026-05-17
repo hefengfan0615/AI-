@@ -6,7 +6,7 @@ from datetime import datetime
 import warnings
 import locale
 import numpy as np
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Font, numbers
 from openpyxl.utils import get_column_letter
 
 # ---------- 1. 抑制 OpenPyXL 警告 ----------
@@ -615,7 +615,11 @@ def export_optimized_excel(order_file, output_path):
                         cell.alignment = Alignment(horizontal=align, vertical='center')
                         if "成长率" in col_name and cell.value is not None:
                             if isinstance(cell.value, (int, float)):
-                                cell.value = f"{cell.value:.2f}%"
+                                if cell.value == float('inf'):
+                                    cell.value = "∞"
+                                else:
+                                    cell.value = cell.value / 100  # 转换为0-1范围的小数
+                                    cell.number_format = '0.00%'  # 设置为百分比格式
                             elif cell.value is None:
                                 cell.value = "∞"
 
@@ -659,13 +663,16 @@ def export_optimized_excel(order_file, output_path):
                     else:
                         continue
                     if cur_col_idx and prev_col_idx:
-                        cur_letter = get_column_letter(cur_col_idx)
-                        prev_letter = get_column_letter(prev_col_idx)
-                        # 公式 =IF(prev=0,IF(cur>0,"∞","0.00%"),((cur-prev)/prev*100))
-                        formula = f'=IF({prev_letter}{sum_row_store}=0,IF({cur_letter}{sum_row_store}>0,"∞","0.00%"),(({cur_letter}{sum_row_store}-{prev_letter}{sum_row_store})/{prev_letter}{sum_row_store}*100))'
-                        ws_store.cell(row=sum_row_store, column=col_idx, value=formula)
-                        ws_store.cell(row=sum_row_store, column=col_idx).font = Font(bold=True)
-                        ws_store.cell(row=sum_row_store, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                            cur_letter = get_column_letter(cur_col_idx)
+                            prev_letter = get_column_letter(prev_col_idx)
+                            # 使用Excel公式并设置单元格格式为百分比
+                            formula = f'=IF({prev_letter}{sum_row_store}=0,IF({cur_letter}{sum_row_store}>0,"∞",0),(({cur_letter}{sum_row_store}-{prev_letter}{sum_row_store})/{prev_letter}{sum_row_store}))'
+                            cell = ws_store.cell(row=sum_row_store, column=col_idx, value=formula)
+                            cell.font = Font(bold=True)
+                            cell.alignment = Alignment(horizontal='right', vertical='center')
+                            # 设置百分比格式，两位小数
+                            if cell.value != "∞":
+                                cell.number_format = '0.00%'
 
             # 格式化省份汇总并添加总计行
             ws_prov = writer.sheets['省份汇总']
@@ -705,12 +712,16 @@ def export_optimized_excel(order_file, output_path):
                     else:
                         continue
                     if cur_col_idx and prev_col_idx:
-                        cur_letter = get_column_letter(cur_col_idx)
-                        prev_letter = get_column_letter(prev_col_idx)
-                        formula = f'=IF({prev_letter}{sum_row_prov}=0,IF({cur_letter}{sum_row_prov}>0,"∞","0.00%"),(({cur_letter}{sum_row_prov}-{prev_letter}{sum_row_prov})/{prev_letter}{sum_row_prov}*100))'
-                        ws_prov.cell(row=sum_row_prov, column=col_idx, value=formula)
-                        ws_prov.cell(row=sum_row_prov, column=col_idx).font = Font(bold=True)
-                        ws_prov.cell(row=sum_row_prov, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                            cur_letter = get_column_letter(cur_col_idx)
+                            prev_letter = get_column_letter(prev_col_idx)
+                            # 使用Excel公式并设置单元格格式为百分比
+                            formula = f'=IF({prev_letter}{sum_row_prov}=0,IF({cur_letter}{sum_row_prov}>0,"∞",0),(({cur_letter}{sum_row_prov}-{prev_letter}{sum_row_prov})/{prev_letter}{sum_row_prov}))'
+                            cell = ws_prov.cell(row=sum_row_prov, column=col_idx, value=formula)
+                            cell.font = Font(bold=True)
+                            cell.alignment = Alignment(horizontal='right', vertical='center')
+                            # 设置百分比格式，两位小数
+                            if cell.value != "∞":
+                                cell.number_format = '0.00%'
 
             # 时间范围说明 Sheet
             range_dates, _ = parse_order_metadata(order_file)

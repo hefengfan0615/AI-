@@ -5,7 +5,7 @@ import re
 from datetime import datetime
 import warnings
 import locale
-from openpyxl.styles import Alignment, Font
+from openpyxl.styles import Alignment, Font, numbers
 from openpyxl.utils import get_column_letter
 
 # ---------- 1. 抑制 OpenPyXL 警告 ----------
@@ -787,7 +787,8 @@ def export_optimized_excel(order_file, output_path):
                                 if cell.value == float('inf'):
                                     cell.value = "∞"
                                 else:
-                                    cell.value = f"{cell.value:.2f}%"
+                                    cell.value = cell.value / 100  # 转换为0-1范围的小数
+                                    cell.number_format = '0.00%'  # 设置为百分比格式
 
             # 格式化三个 sheet
             for sheet_name, df in [('品项汇总', item_df), ('门店汇总', store_df), ('省份汇总', prov_df)]:
@@ -844,10 +845,14 @@ def export_optimized_excel(order_file, output_path):
                         if cur_col_idx and prev_col_idx:
                             cur_letter = get_column_letter(cur_col_idx)
                             prev_letter = get_column_letter(prev_col_idx)
-                            formula = f'=IF({prev_letter}{sum_row}=0,IF({cur_letter}{sum_row}>0,"∞","0.00%"),(({cur_letter}{sum_row}-{prev_letter}{sum_row})/{prev_letter}{sum_row}*100))'
-                            ws.cell(row=sum_row, column=col_idx, value=formula)
-                            ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
-                            ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                            # 使用Excel公式并设置单元格格式为百分比
+                            formula = f'=IF({prev_letter}{sum_row}=0,IF({cur_letter}{sum_row}>0,"∞",0),(({cur_letter}{sum_row}-{prev_letter}{sum_row})/{prev_letter}{sum_row}))'
+                            cell = ws.cell(row=sum_row, column=col_idx, value=formula)
+                            cell.font = Font(bold=True)
+                            cell.alignment = Alignment(horizontal='right', vertical='center')
+                            # 设置百分比格式，两位小数
+                            if cell.value != "∞":
+                                cell.number_format = '0.00%'
 
             # ------------------ 时间范围说明 Sheet ------------------
             if range_dates:
