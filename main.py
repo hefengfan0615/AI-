@@ -395,12 +395,17 @@ def export_optimized_excel(order_file, output_path):
         if not col_map:
             raise ValueError("未能识别任何 Range 相关列（销量、销售额、库存、在途）")
 
-        # 构建聚合字典
+        # 构建聚合字典（只有Range1包含库存和在途）
         agg_dict = {}
         for rn, cols in col_map.items():
-            for metric in ["units", "sales", "oh", "oo"]:
+            for metric in ["units", "sales"]:
                 if metric in cols:
                     agg_dict[cols[metric]] = "sum"
+            # 只有Range1有库存和在途
+            if rn == 1:
+                for metric in ["oh", "oo"]:
+                    if metric in cols:
+                        agg_dict[cols[metric]] = "sum"
 
         # 转换数值列
         for col in agg_dict.keys():
@@ -619,7 +624,9 @@ def export_optimized_excel(order_file, output_path):
             format_sheet(ws_store, grouped)
             # 确定门店汇总的数值列（排除基础列和成长率）
             numeric_cols_store = [c for c in grouped.columns if c not in base_cols and "成长率" not in c]
-            sum_row_store = ws_store.max_row + 1
+            # 重要：先记录数据行数，再添加总计行
+            data_row_count = ws_store.max_row
+            sum_row_store = data_row_count + 1
             ws_store.cell(row=sum_row_store, column=1, value="总计")
             ws_store.cell(row=sum_row_store, column=1).font = Font(bold=True)
             total_col_indices = {}
@@ -627,7 +634,7 @@ def export_optimized_excel(order_file, output_path):
                 if col_name in numeric_cols_store:
                     # 使用 Excel SUM 公式
                     col_letter = get_column_letter(col_idx)
-                    formula = f"=SUM({col_letter}3:{col_letter}{ws_store.max_row})"
+                    formula = f"=SUM({col_letter}3:{col_letter}{data_row_count})"
                     ws_store.cell(row=sum_row_store, column=col_idx, value=formula)
                     ws_store.cell(row=sum_row_store, column=col_idx).font = Font(bold=True)
                     ws_store.cell(row=sum_row_store, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
@@ -665,14 +672,16 @@ def export_optimized_excel(order_file, output_path):
             format_sheet(ws_prov, prov_grouped)
             prov_base_cols = ["省份"]
             numeric_cols_prov = [c for c in prov_grouped.columns if c not in prov_base_cols and "成长率" not in c and "销量最好门店" not in c and "销量最差门店" not in c]
-            sum_row_prov = ws_prov.max_row + 1
+            # 重要：先记录数据行数，再添加总计行
+            data_row_count_prov = ws_prov.max_row
+            sum_row_prov = data_row_count_prov + 1
             ws_prov.cell(row=sum_row_prov, column=1, value="总计")
             ws_prov.cell(row=sum_row_prov, column=1).font = Font(bold=True)
             total_col_indices_prov = {}
             for col_idx, col_name in enumerate(prov_grouped.columns, start=1):
                 if col_name in numeric_cols_prov:
                     col_letter = get_column_letter(col_idx)
-                    formula = f"=SUM({col_letter}3:{col_letter}{ws_prov.max_row})"
+                    formula = f"=SUM({col_letter}3:{col_letter}{data_row_count_prov})"
                     ws_prov.cell(row=sum_row_prov, column=col_idx, value=formula)
                     ws_prov.cell(row=sum_row_prov, column=col_idx).font = Font(bold=True)
                     ws_prov.cell(row=sum_row_prov, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')

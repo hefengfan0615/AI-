@@ -764,7 +764,9 @@ def export_optimized_excel(order_file, output_path):
                 else:
                     base_cols = ["省份"]
                 numeric_cols = [c for c in df.columns if c not in base_cols and "成长率" not in c and c not in ["销量最好门店", "销量最差门店"]]
-                sum_row = ws.max_row + 1
+                # 重要：先记录数据行数，再添加总计行
+                data_row_count = ws.max_row
+                sum_row = data_row_count + 1
                 ws.cell(row=sum_row, column=1, value="总计")
                 ws.cell(row=sum_row, column=1).font = Font(bold=True)
                 total_col_indices = {}
@@ -772,14 +774,14 @@ def export_optimized_excel(order_file, output_path):
                     if col_name in numeric_cols:
                         # 使用 Excel SUM 公式
                         col_letter = get_column_letter(col_idx)
-                        formula = f"=SUM({col_letter}3:{col_letter}{ws.max_row})"
+                        formula = f"=SUM({col_letter}3:{col_letter}{data_row_count})"
                         ws.cell(row=sum_row, column=col_idx, value=formula)
                         ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
                         ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
                         total_col_indices[col_name] = col_idx
                     # 品项汇总的所有列左对齐
                     if sheet_name == '品项汇总':
-                        for row in range(3, ws.max_row + 1):
+                        for row in range(3, data_row_count + 1):
                             ws.cell(row=row, column=col_idx).alignment = Alignment(horizontal='left', vertical='center')
                 # 计算成长率总计（也使用公式）
                 for col_idx, col_name in enumerate(df.columns, start=1):
