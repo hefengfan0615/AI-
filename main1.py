@@ -700,7 +700,11 @@ def export_optimized_excel(order_file, output_path):
             if m:
                 rn = int(m.group(1))
                 metric = m.group(2)
-                metric_order = {"销量": 1, "销售额": 2, "库存": 3, "在途": 4, "在订": 5}
+                # Range1 特殊顺序：库存、在途、在订（销量和销售额在其他Range也有，保持通用顺序）
+                if rn == 1:
+                    metric_order = {"销量": 1, "库存": 2, "在途": 3, "在订": 4, "销售额": 5}
+                else:
+                    metric_order = {"销量": 1, "销售额": 2}
                 return (rn, metric_order.get(metric, 99))
             return (999, x)
         item_range_cols.sort(key=sort_key)
@@ -943,95 +947,118 @@ def analyze_sales(order_file):
                     rename_dict[oh_cols[rn]] = f"Range{rn}_库存"
                 if rn in transit_cols:
                     rename_dict[transit_cols[rn]] = f"Range{rn}_在途"
-        item_df.rename(columns=rename_dict, inplace=True)
-        item_df["品名"] = item_df.apply(make_item_name, axis=1)
+                if rn in oo_cols:
+                    rename_dict[oo_cols[rn]] = f"Range{rn}_在订"
+        store_df.rename(columns=rename_dict, inplace=True)
+        prov_df.rename(columns=rename_dict, inplace=True)
 
-        # 构建文本表格
-        def build_text_table(df, metric_type):
-            is_qty = (metric_type == 'Qty')
-            prefix = "销量" if is_qty else "销售额"
-            col_map = {}
-            for rn in all_ranges:
-                col_name = f"Range{rn}_{prefix}"
-                if col_name in df.columns:
-                    col_map[rn] = col_name
-            if not col_map:
-                return "无数据"
+        # 销售日期
+        if 1 not in range_dates:
+            raise ValueError("未找到 Range 1 的时间范围，无法确定销售日期")
+        sale_date = range_dates[1]["end"]
+        sale_date_str = sale_date.strftime("%Y年%m月%d日")
 
-            headers = ["品名", "UPC"]
-            if 1 in col_map: headers.append(f"日{prefix}")
-            if 2 in col_map: headers.append(f"月{prefix}")
-            if 3 in col_map: headers.append(f"去年同月{prefix}")
-            if 2 in col_map and 3 in col_map: headers.append(f"{prefix}月成长率")
-            if 4 in col_map: headers.append(f"今年至今{prefix}")
-            if 5 in col_map: headers.append(f"去年同期{prefix}")
-            if 4 in col_map and 5 in col_map: headers.append(f"{prefix}YTD成长率")
+        # 总销量
+        day_sales = store_df["Range1_销量"].sum() if "Range1_销量" in store_df.columns else 0
 
-            rows = []
-            for _, row in df.iterrows():
-                line = [row["品名"], row["UPC"]]
-                if 1 in col_map:
-                    val = row[col_map[1]]
-                    line.append(f"{val:,.0f}" if is_qty else f"{val:,.2f}")
-                if 2 in col_map:
-                    val = row[col_map[2]]
-                    line.append(f"{val:,.0f}" if is_qty else f"{val:,.2f}")
-                if 3 in col_map:
-                    val = row[col_map[3]]
-                    line.append(f"{val:,.0f}" if is_qty else f"{val:,.2f}")
-                if 2 in col_map and 3 in col_map:
-                    cur = row[col_map[2]]
-                    prev = row[col_map[3]]
-                    g = growth_rate(cur, prev)
-                    line.append(f"{g:.1f}%" if g != float('inf') else "∞")
-                if 4 in col_map:
-                    val = row[col_map[4]]
-                    line.append(f"{val:,.0f}" if is_qty else f"{val:,.2f}")
-                if 5 in col_map:
-                    val = row[col_map[5]]
-                    line.append(f"{val:,.0f}" if is_qty else f"{val:,.2f}")
-                if 4 in col_map and 5 in col_map:
-                    cur = row[col_map[4]]
-                    prev = row[col_map[5]]
-                    g = growth_rate(cur, prev)
-                    line.append(f"{g:.1f}%" if g != float('inf') else "∞")
-                rows.append(line)
+        # 最高销售门店
+        if day_sales == 0:
+            best_store_desc = "无销售数据"
+            best_units = 0
+        else:
+            max_row = store_df.loc[store_df["Range1_销量"].idxmax()]
+            best_club = max_row["Store Nbr"]
+            best_units = max_row["Range1_销量"]
+            province, district, erp, city = get_store_info(best_club)
+            best_store_desc = f"{district}（{province}）{erp}"
 
-            total_line = ["【总计】", ""]
-            for rn in all_ranges:
-                if rn in col_map:
-                    total = df[col_map[rn]].sum()
-                    total_line.append(f"{total:,.0f}" if is_qty else f"{total:,.2f}")
+        # 成长率计算
+        def growth_rate(current, previous):
+            if previous == 0:
+                return float('inf') if current > 0 else 0
+            return (current - previous) / previous * 100
 
-            output = []
-            output.append("   ".join(headers))
-            output.append("-" * 80)
-            for r in rows:
-                output.append("   ".join(str(x) for x in r))
-            output.append("-" * 80)
-            output.append("   ".join(str(x) for x in total_line))
-            return "\n".join(output)
+        # 计算各Range总量
+        total_units = {}
+        total_sales = {}
+        for rn in all_ranges:
+            qty_col = f"Range{rn}_销量"
+            sales_col = f"Range{rn}_销售额"
+            if qty_col in store_df.columns:
+                total_units[rn] = store_df[qty_col].sum()
+            if sales_col in store_df.columns:
+                total_sales[rn] = store_df[sales_col].sum()
 
-        result = []
-        result.append("")
-        result.append("=" * 80)
-        result.append(f"订单文件：{order_file}")
-        if 1 in range_dates:
-            result.append(f"销售日期：{range_dates[1]['end'].strftime('%Y年%m月%d日')}")
-        result.append("=" * 80)
-        result.append("")
-        result.append("【销量分析（单位：瓶）】")
-        result.append(build_text_table(item_df, 'Qty'))
-        result.append("")
-        result.append("【销额分析（单位：元）】")
-        result.append(build_text_table(item_df, 'Sales'))
-        result.append("")
-        result.append("【各时间段说明】")
-        for rn in sorted(range_dates.keys()):
-            start = range_dates[rn]["start"].strftime("%Y-%m-%d")
-            end = range_dates[rn]["end"].strftime("%Y-%m-%d")
-            result.append(f"  Range{rn}：{start} 至 {end}")
-        return "\n".join(result), None
+        month_growth = growth_rate(total_units.get(2, 0), total_units.get(3, 0))
+        year_growth = growth_rate(total_units.get(4, 0), total_units.get(5, 0))
+
+        # 门店明细
+        store_list = []
+        for _, row in store_df.iterrows():
+            club = row["Store Nbr"]
+            units = row.get("Range1_销量", 0)
+            if units == 0:
+                continue
+            province, district, erp, city = get_store_info(club)
+            store_list.append({
+                "Store Nbr": club,
+                "门店名称": erp,
+                "大区": district,
+                "省份": province,
+                "城市": city,
+                "Range1销量": int(units)
+            })
+        store_list.sort(key=lambda x: x["Range1销量"], reverse=True)
+
+        # 省份汇总
+        province_sales = {}
+        for s in store_list:
+            prov = s["省份"]
+            province_sales[prov] = province_sales.get(prov, 0) + s["Range1销量"]
+        sorted_provinces = sorted(province_sales.items(), key=lambda x: x[1], reverse=True)
+
+        # 取前五名门店
+        top5_stores = store_list[:5]
+
+        result_lines = []
+        result_lines.append("")
+        result_lines.append("=" * 60)
+        result_lines.append(f"订单文件：{order_file}")
+        result_lines.append("门店信息：内置字典")
+        result_lines.append("=" * 60)
+        result_lines.append("")
+        result_lines.append(f"销售日期：{sale_date_str}  总销量：{day_sales:,.0f} 瓶")
+        result_lines.append("")
+        if best_units > 0:
+            result_lines.append(f"最高销售门店：{best_store_desc}")
+            result_lines.append(f"销售瓶数：{best_units:,.0f} 瓶")
+        else:
+            result_lines.append("无单日销售数据，无法确定最高销售门店。")
+        result_lines.append("")
+        result_lines.append(f"较去年同月份销量成长率：{month_growth:+.2f}% （对比 Range2 vs Range3）")
+        result_lines.append(f"较去年同年份销量成长率：{year_growth:+.2f}% （对比 Range4 vs Range5）")
+        result_lines.append("")
+        result_lines.append("【前五名门店销量排名】")
+        result_lines.append("-" * 40)
+        for i, store in enumerate(top5_stores, 1):
+            result_lines.append(f"  第{i}名：{store['门店名称']} ({store['省份']}) - {store['Range1销量']:,} 瓶")
+        result_lines.append("")
+        result_lines.append("【省份销量排名】")
+        result_lines.append("-" * 40)
+        for i, (prov, sales) in enumerate(sorted_provinces, 1):
+            result_lines.append(f"  第{i}名：{prov} - {sales:,} 瓶")
+        result_lines.append("")
+        result_lines.append("【各时间段销量与周期】")
+        for rn in sorted(all_ranges):
+            units = total_units.get(rn, 0)
+            if rn in range_dates:
+                start = range_dates[rn]["start"].strftime("%Y-%m-%d")
+                end = range_dates[rn]["end"].strftime("%Y-%m-%d")
+                period = f"{start} 至 {end}"
+            else:
+                period = "时间范围未知"
+            result_lines.append(f"  Range{rn}：{units:,.0f} 瓶  （{period}）")
+        return "\n".join(result_lines), None
     except Exception as e:
         return None, str(e)
 

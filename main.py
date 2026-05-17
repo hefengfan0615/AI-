@@ -364,13 +364,14 @@ def export_optimized_excel(order_file, output_path):
             raise ValueError("订单文件缺少 Club Nbr 列")
         df_full["Club Nbr"] = df_full["Club Nbr"].astype(str).str.extract(r"(\d+)")[0].astype(float).astype(int)
 
-        # ---------- 改进的列识别逻辑（支持库存、在途）----------
-        col_map = {}  # { range_num: {"units": col_name, "sales": col_name, "oh": col_name, "oo": col_name} }
+        # ---------- 改进的列识别逻辑（支持库存、在途、在订）----------
+        col_map = {}  # { range_num: {"units": col_name, "sales": col_name, "oh": col_name, "transit": col_name, "oo": col_name} }
         # 定义可能出现的指标关键词
         metric_keywords = {
             "units": ["Total Units Sold", "total units sold"],
             "sales": ["Total Sell Dollars", "total sell dollars"],
             "oh": ["Current On-Hand Qty", "current on-hand qty", "On-Hand Qty"],
+            "transit": ["Current In-Transit Qty", "current in-transit qty", "In-Transit Qty"],
             "oo": ["Current On-Order Qty", "current on-order qty", "On-Order Qty"]
         }
         
@@ -395,15 +396,15 @@ def export_optimized_excel(order_file, output_path):
         if not col_map:
             raise ValueError("未能识别任何 Range 相关列（销量、销售额、库存、在途）")
 
-        # 构建聚合字典（只有Range1包含库存和在途）
+        # 构建聚合字典（只有Range1包含库存、在途、在订）
         agg_dict = {}
         for rn, cols in col_map.items():
             for metric in ["units", "sales"]:
                 if metric in cols:
                     agg_dict[cols[metric]] = "sum"
-            # 只有Range1有库存和在途
+            # 只有Range1有库存、在途和在途
             if rn == 1:
-                for metric in ["oh", "oo"]:
+                for metric in ["oh", "transit", "oo"]:
                     if metric in cols:
                         agg_dict[cols[metric]] = "sum"
 
@@ -440,12 +441,14 @@ def export_optimized_excel(order_file, output_path):
                 rename_dict[cols["units"]] = f"Range{rn}_销量"
             if "sales" in cols:
                 rename_dict[cols["sales"]] = f"Range{rn}_销售额"
-            # 只有 Range1 有 库存 和 在途
+            # 只有 Range1 有 库存、在途、在订
             if rn == 1:
                 if "oh" in cols:
                     rename_dict[cols["oh"]] = f"Range{rn}_库存"
+                if "transit" in cols:
+                    rename_dict[cols["transit"]] = f"Range{rn}_在途"
                 if "oo" in cols:
-                    rename_dict[cols["oo"]] = f"Range{rn}_在途"
+                    rename_dict[cols["oo"]] = f"Range{rn}_在订"
         grouped.rename(columns=rename_dict, inplace=True)
         prov_grouped.rename(columns=rename_dict, inplace=True)
 
@@ -509,7 +512,11 @@ def export_optimized_excel(order_file, output_path):
             if m:
                 rn = int(m.group(1))
                 metric = m.group(2)
-                order = {"销量": 1, "销售额": 2, "库存": 3, "在途": 4}
+                # Range1 特殊顺序：库存、在途、在订（销量和销售额在其他Range也有，保持通用顺序）
+                if rn == 1:
+                    order = {"销量": 1, "库存": 2, "在途": 3, "在订": 4, "销售额": 5}
+                else:
+                    order = {"销量": 1, "销售额": 2}
                 return (rn, order.get(metric, 99))
             return (999, col)
         all_range_cols.sort(key=sort_key)
