@@ -435,10 +435,12 @@ def export_optimized_excel(order_file, output_path):
                 rename_dict[cols["units"]] = f"Range{rn}_销量"
             if "sales" in cols:
                 rename_dict[cols["sales"]] = f"Range{rn}_销售额"
-            if "oh" in cols:
-                rename_dict[cols["oh"]] = f"Range{rn}_库存"
-            if "oo" in cols:
-                rename_dict[cols["oo"]] = f"Range{rn}_在途"
+            # 只有 Range1 有 库存 和 在途
+            if rn == 1:
+                if "oh" in cols:
+                    rename_dict[cols["oh"]] = f"Range{rn}_库存"
+                if "oo" in cols:
+                    rename_dict[cols["oo"]] = f"Range{rn}_在途"
         grouped.rename(columns=rename_dict, inplace=True)
         prov_grouped.rename(columns=rename_dict, inplace=True)
 
@@ -620,44 +622,43 @@ def export_optimized_excel(order_file, output_path):
             sum_row_store = ws_store.max_row + 1
             ws_store.cell(row=sum_row_store, column=1, value="总计")
             ws_store.cell(row=sum_row_store, column=1).font = Font(bold=True)
-            total_values = {}
+            total_col_indices = {}
             for col_idx, col_name in enumerate(grouped.columns, start=1):
                 if col_name in numeric_cols_store:
-                    total = 0
-                    for row in range(3, ws_store.max_row):
-                        cell_val = ws_store.cell(row=row, column=col_idx).value
-                        if isinstance(cell_val, (int, float)):
-                            total += cell_val
-                    ws_store.cell(row=sum_row_store, column=col_idx, value=total)
+                    # 使用 Excel SUM 公式
+                    col_letter = get_column_letter(col_idx)
+                    formula = f"=SUM({col_letter}3:{col_letter}{ws_store.max_row})"
+                    ws_store.cell(row=sum_row_store, column=col_idx, value=formula)
                     ws_store.cell(row=sum_row_store, column=col_idx).font = Font(bold=True)
                     ws_store.cell(row=sum_row_store, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
-                    total_values[col_name] = total
-            # 计算成长率列的总计值
+                    total_col_indices[col_name] = col_idx
+            # 计算成长率列的总计值（也使用公式）
             for col_idx, col_name in enumerate(grouped.columns, start=1):
                 if "成长率" in col_name:
                     if "Range2-3" in col_name:
                         if "销量" in col_name:
-                            cur = total_values.get("Range2_销量", 0)
-                            prev = total_values.get("Range3_销量", 0)
+                            cur_col_idx = total_col_indices.get("Range2_销量")
+                            prev_col_idx = total_col_indices.get("Range3_销量")
                         else:
-                            cur = total_values.get("Range2_销售额", 0)
-                            prev = total_values.get("Range3_销售额", 0)
+                            cur_col_idx = total_col_indices.get("Range2_销售额")
+                            prev_col_idx = total_col_indices.get("Range3_销售额")
                     elif "Range4-5" in col_name:
                         if "销量" in col_name:
-                            cur = total_values.get("Range4_销量", 0)
-                            prev = total_values.get("Range5_销量", 0)
+                            cur_col_idx = total_col_indices.get("Range4_销量")
+                            prev_col_idx = total_col_indices.get("Range5_销量")
                         else:
-                            cur = total_values.get("Range4_销售额", 0)
-                            prev = total_values.get("Range5_销售额", 0)
+                            cur_col_idx = total_col_indices.get("Range4_销售额")
+                            prev_col_idx = total_col_indices.get("Range5_销售额")
                     else:
                         continue
-                    if prev == 0:
-                        val = "∞" if cur > 0 else "0.00%"
-                    else:
-                        val = f"{((cur - prev) / prev * 100):.2f}%"
-                    ws_store.cell(row=sum_row_store, column=col_idx, value=val)
-                    ws_store.cell(row=sum_row_store, column=col_idx).font = Font(bold=True)
-                    ws_store.cell(row=sum_row_store, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                    if cur_col_idx and prev_col_idx:
+                        cur_letter = get_column_letter(cur_col_idx)
+                        prev_letter = get_column_letter(prev_col_idx)
+                        # 公式 =IF(prev=0,IF(cur>0,"∞","0.00%"),((cur-prev)/prev*100))
+                        formula = f'=IF({prev_letter}{sum_row_store}=0,IF({cur_letter}{sum_row_store}>0,"∞","0.00%"),(({cur_letter}{sum_row_store}-{prev_letter}{sum_row_store})/{prev_letter}{sum_row_store}*100))'
+                        ws_store.cell(row=sum_row_store, column=col_idx, value=formula)
+                        ws_store.cell(row=sum_row_store, column=col_idx).font = Font(bold=True)
+                        ws_store.cell(row=sum_row_store, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
 
             # 格式化省份汇总并添加总计行
             ws_prov = writer.sheets['省份汇总']
@@ -667,43 +668,40 @@ def export_optimized_excel(order_file, output_path):
             sum_row_prov = ws_prov.max_row + 1
             ws_prov.cell(row=sum_row_prov, column=1, value="总计")
             ws_prov.cell(row=sum_row_prov, column=1).font = Font(bold=True)
-            total_values_prov = {}
+            total_col_indices_prov = {}
             for col_idx, col_name in enumerate(prov_grouped.columns, start=1):
                 if col_name in numeric_cols_prov:
-                    total = 0
-                    for row in range(3, ws_prov.max_row):
-                        cell_val = ws_prov.cell(row=row, column=col_idx).value
-                        if isinstance(cell_val, (int, float)):
-                            total += cell_val
-                    ws_prov.cell(row=sum_row_prov, column=col_idx, value=total)
+                    col_letter = get_column_letter(col_idx)
+                    formula = f"=SUM({col_letter}3:{col_letter}{ws_prov.max_row})"
+                    ws_prov.cell(row=sum_row_prov, column=col_idx, value=formula)
                     ws_prov.cell(row=sum_row_prov, column=col_idx).font = Font(bold=True)
                     ws_prov.cell(row=sum_row_prov, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
-                    total_values_prov[col_name] = total
+                    total_col_indices_prov[col_name] = col_idx
             for col_idx, col_name in enumerate(prov_grouped.columns, start=1):
                 if "成长率" in col_name:
                     if "Range2-3" in col_name:
                         if "销量" in col_name:
-                            cur = total_values_prov.get("Range2_销量", 0)
-                            prev = total_values_prov.get("Range3_销量", 0)
+                            cur_col_idx = total_col_indices_prov.get("Range2_销量")
+                            prev_col_idx = total_col_indices_prov.get("Range3_销量")
                         else:
-                            cur = total_values_prov.get("Range2_销售额", 0)
-                            prev = total_values_prov.get("Range3_销售额", 0)
+                            cur_col_idx = total_col_indices_prov.get("Range2_销售额")
+                            prev_col_idx = total_col_indices_prov.get("Range3_销售额")
                     elif "Range4-5" in col_name:
                         if "销量" in col_name:
-                            cur = total_values_prov.get("Range4_销量", 0)
-                            prev = total_values_prov.get("Range5_销量", 0)
+                            cur_col_idx = total_col_indices_prov.get("Range4_销量")
+                            prev_col_idx = total_col_indices_prov.get("Range5_销量")
                         else:
-                            cur = total_values_prov.get("Range4_销售额", 0)
-                            prev = total_values_prov.get("Range5_销售额", 0)
+                            cur_col_idx = total_col_indices_prov.get("Range4_销售额")
+                            prev_col_idx = total_col_indices_prov.get("Range5_销售额")
                     else:
                         continue
-                    if prev == 0:
-                        val = "∞" if cur > 0 else "0.00%"
-                    else:
-                        val = f"{((cur - prev) / prev * 100):.2f}%"
-                    ws_prov.cell(row=sum_row_prov, column=col_idx, value=val)
-                    ws_prov.cell(row=sum_row_prov, column=col_idx).font = Font(bold=True)
-                    ws_prov.cell(row=sum_row_prov, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                    if cur_col_idx and prev_col_idx:
+                        cur_letter = get_column_letter(cur_col_idx)
+                        prev_letter = get_column_letter(prev_col_idx)
+                        formula = f'=IF({prev_letter}{sum_row_prov}=0,IF({cur_letter}{sum_row_prov}>0,"∞","0.00%"),(({cur_letter}{sum_row_prov}-{prev_letter}{sum_row_prov})/{prev_letter}{sum_row_prov}*100))'
+                        ws_prov.cell(row=sum_row_prov, column=col_idx, value=formula)
+                        ws_prov.cell(row=sum_row_prov, column=col_idx).font = Font(bold=True)
+                        ws_prov.cell(row=sum_row_prov, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
 
             # 时间范围说明 Sheet
             range_dates, _ = parse_order_metadata(order_file)

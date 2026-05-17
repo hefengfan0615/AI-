@@ -755,53 +755,56 @@ def export_optimized_excel(order_file, output_path):
                 ws = writer.sheets[sheet_name]
                 format_sheet(ws, df, sheet_name)
 
-                # 添加总计行（仅门店和省份）
-                if sheet_name in ['门店汇总', '省份汇总']:
-                    base_cols = []
-                    if sheet_name == '门店汇总':
-                        base_cols = ["Store Nbr", "门店名称", "省份", "大区", "城市"]
-                    else:
-                        base_cols = ["省份"]
-                    numeric_cols = [c for c in df.columns if c not in base_cols and "成长率" not in c and c not in ["销量最好门店", "销量最差门店"]]
-                    sum_row = ws.max_row + 1
-                    ws.cell(row=sum_row, column=1, value="总计")
-                    ws.cell(row=sum_row, column=1).font = Font(bold=True)
-                    total_vals = {}
-                    for col_idx, col_name in enumerate(df.columns, start=1):
-                        if col_name in numeric_cols:
-                            total = 0
-                            for row in range(3, ws.max_row):
-                                cell_val = ws.cell(row=row, column=col_idx).value
-                                if isinstance(cell_val, (int, float)):
-                                    total += cell_val
-                            ws.cell(row=sum_row, column=col_idx, value=total)
-                            ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
-                            ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
-                            total_vals[col_name] = total
-                    # 计算成长率总计
-                    for col_idx, col_name in enumerate(df.columns, start=1):
-                        if "成长率" in col_name:
-                            if "Range2-3" in col_name:
-                                if "销量" in col_name:
-                                    cur = total_vals.get("Range2_销量", 0)
-                                    prev = total_vals.get("Range3_销量", 0)
-                                else:
-                                    cur = total_vals.get("Range2_销售额", 0)
-                                    prev = total_vals.get("Range3_销售额", 0)
-                            elif "Range4-5" in col_name:
-                                if "销量" in col_name:
-                                    cur = total_vals.get("Range4_销量", 0)
-                                    prev = total_vals.get("Range5_销量", 0)
-                                else:
-                                    cur = total_vals.get("Range4_销售额", 0)
-                                    prev = total_vals.get("Range5_销售额", 0)
+                # 添加总计行（所有 sheet）
+                base_cols = []
+                if sheet_name == '品项汇总':
+                    base_cols = ["品名", "UPC", "Item Desc 1"]
+                elif sheet_name == '门店汇总':
+                    base_cols = ["Store Nbr", "门店名称", "省份", "大区", "城市"]
+                else:
+                    base_cols = ["省份"]
+                numeric_cols = [c for c in df.columns if c not in base_cols and "成长率" not in c and c not in ["销量最好门店", "销量最差门店"]]
+                sum_row = ws.max_row + 1
+                ws.cell(row=sum_row, column=1, value="总计")
+                ws.cell(row=sum_row, column=1).font = Font(bold=True)
+                total_col_indices = {}
+                for col_idx, col_name in enumerate(df.columns, start=1):
+                    if col_name in numeric_cols:
+                        # 使用 Excel SUM 公式
+                        col_letter = get_column_letter(col_idx)
+                        formula = f"=SUM({col_letter}3:{col_letter}{ws.max_row})"
+                        ws.cell(row=sum_row, column=col_idx, value=formula)
+                        ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
+                        ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+                        total_col_indices[col_name] = col_idx
+                    # 品项汇总的所有列左对齐
+                    if sheet_name == '品项汇总':
+                        for row in range(3, ws.max_row + 1):
+                            ws.cell(row=row, column=col_idx).alignment = Alignment(horizontal='left', vertical='center')
+                # 计算成长率总计（也使用公式）
+                for col_idx, col_name in enumerate(df.columns, start=1):
+                    if "成长率" in col_name:
+                        if "Range2-3" in col_name:
+                            if "销量" in col_name:
+                                cur_col_idx = total_col_indices.get("Range2_销量")
+                                prev_col_idx = total_col_indices.get("Range3_销量")
                             else:
-                                continue
-                            if prev == 0:
-                                val = "∞" if cur > 0 else "0.00%"
+                                cur_col_idx = total_col_indices.get("Range2_销售额")
+                                prev_col_idx = total_col_indices.get("Range3_销售额")
+                        elif "Range4-5" in col_name:
+                            if "销量" in col_name:
+                                cur_col_idx = total_col_indices.get("Range4_销量")
+                                prev_col_idx = total_col_indices.get("Range5_销量")
                             else:
-                                val = f"{((cur - prev) / prev * 100):.2f}%"
-                            ws.cell(row=sum_row, column=col_idx, value=val)
+                                cur_col_idx = total_col_indices.get("Range4_销售额")
+                                prev_col_idx = total_col_indices.get("Range5_销售额")
+                        else:
+                            continue
+                        if cur_col_idx and prev_col_idx:
+                            cur_letter = get_column_letter(cur_col_idx)
+                            prev_letter = get_column_letter(prev_col_idx)
+                            formula = f'=IF({prev_letter}{sum_row}=0,IF({cur_letter}{sum_row}>0,"∞","0.00%"),(({cur_letter}{sum_row}-{prev_letter}{sum_row})/{prev_letter}{sum_row}*100))'
+                            ws.cell(row=sum_row, column=col_idx, value=formula)
                             ws.cell(row=sum_row, column=col_idx).font = Font(bold=True)
                             ws.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
 
