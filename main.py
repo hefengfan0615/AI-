@@ -616,7 +616,7 @@ def export_optimized_excel(order_file, output_path):
                     adjusted_width = min(max(max_len + 2, 10), 50)
                     ws.column_dimensions[col_letter].width = adjusted_width
                     # 对齐方式：数值类右对齐，其他左对齐
-                    align = 'right' if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '成长率', 'Nbr']) else 'left'
+                    align = 'right' if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '在订', '成长率', 'Nbr']) else 'left'
                     for row in range(3, ws.max_row + 1):
                         cell = ws.cell(row=row, column=col_idx)
                         cell.alignment = Alignment(horizontal=align, vertical='center')
