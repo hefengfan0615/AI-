@@ -312,6 +312,7 @@ def analyze_sales(order_file):
         top5_stores = store_list[:5]
 
         result_lines = []
+        result_lines.append("")
         result_lines.append("=" * 60)
         result_lines.append(f"订单文件：{order_file}")
         result_lines.append("门店信息：内置字典")
@@ -349,7 +350,7 @@ def analyze_sales(order_file):
             else:
                 period = "时间范围未知"
             result_lines.append(f"  Range{rn}：{units:,.0f} 瓶  （{period}）")
-        return "\n".join(result_lines), None
+        return "\n\n".join(result_lines), None
     except Exception as e:
         return None, str(e)
 
