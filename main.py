@@ -363,47 +363,69 @@ def export_optimized_excel(order_file, output_path):
             raise ValueError("订单文件缺少 Club Nbr 列")
         df_full["Club Nbr"] = df_full["Club Nbr"].astype(str).str.extract(r"(\d+)")[0].astype(float).astype(int)
 
-        # 识别列（只保留销量列）
+        # 识别列（忽略 POS_Count）
         col_map = {}
         for col in df_full.columns:
             # 跳过 POS 相关列
             if "pos" in col.lower() or "club count" in col.lower():
                 continue
-            m = re.match(r"Range\s*(\d+)\s*(Total Units Sold)", col, re.IGNORECASE)
+            m = re.match(r"Range\s*(\d+)\s*(Total Units Sold|Total Sell Dollars|Current On-Hand Qty|Current On-Order Qty)", col, re.IGNORECASE)
             if m:
                 rn = int(m.group(1))
-                col_map[rn] = col
+                metric = m.group(2).lower().replace(" ", "_")
+                if rn not in col_map:
+                    col_map[rn] = {}
+                if "total_units_sold" in metric:
+                    col_map[rn]["units"] = col
+                elif "total_sell_dollars" in metric:
+                    col_map[rn]["sales"] = col
+                elif "current_on_hand_qty" in metric:
+                    col_map[rn]["oh"] = col
+                elif "current_on_order_qty" in metric:
+                    col_map[rn]["oo"] = col
 
         if not col_map:
             raise ValueError("未能识别任何 Range 相关列")
 
-        # 转换为数值
-        for rn, col in col_map.items():
-            df_full[col] = pd.to_numeric(df_full[col], errors="coerce").fillna(0)
-
         # 聚合门店数据
-        agg_dict = {col: "sum" for col in col_map.values()}
+        agg_dict = {}
+        for rn, cols in col_map.items():
+            for metric in ["units", "sales", "oh", "oo"]:
+                if metric in cols:
+                    agg_dict[cols[metric]] = "sum"
+
+        for col in agg_dict.keys():
+            if col not in ["Club Nbr"]:
+                df_full[col] = pd.to_numeric(df_full[col], errors="coerce").fillna(0)
+
         grouped = df_full.groupby("Club Nbr", as_index=False).agg(agg_dict)
+
+        # 重命名列为中文
+        rename_dict = {}
+        for rn, cols in col_map.items():
+            if "units" in cols:
+                rename_dict[cols["units"]] = f"Range{rn}_销量"
+            if "sales" in cols:
+                rename_dict[cols["sales"]] = f"Range{rn}_销售额"
+            if "oh" in cols:
+                rename_dict[cols["oh"]] = f"Range{rn}_库存"
+            if "oo" in cols:
+                rename_dict[cols["oo"]] = f"Range{rn}_在途"
+        grouped.rename(columns=rename_dict, inplace=True)
 
         # 添加门店信息
         store_info = grouped["Club Nbr"].apply(lambda x: get_store_info(x))
+        grouped["类型"] = store_info.apply(lambda x: x[0])
         grouped["省份"] = store_info.apply(lambda x: x[1])
-        grouped["门店名称"] = store_info.apply(lambda x: x[2])
+        grouped["ERP"] = store_info.apply(lambda x: x[2])
 
-        # 处理门店名称（如果原始数据有，则优先使用原始数据）
+        # 处理门店名称
         if "Club Name" in df_full.columns:
             club_names = df_full.groupby("Club Nbr")["Club Name"].first().reset_index()
             grouped = grouped.merge(club_names, on="Club Nbr", how="left")
-            # 如果原始数据有门店名称，就用原始的，否则用ERP
-            grouped["门店名称"] = grouped.apply(
-                lambda row: row["Club Name"] if pd.notna(row["Club Name"]) and row["Club Name"] != "" else row["门店名称"], 
-                axis=1
-            )
-            grouped.drop(columns=["Club Name"], inplace=True)
-
-        # 重命名列为中文
-        rename_dict = {col: f"Range{rn}_销量" for rn, col in col_map.items()}
-        grouped.rename(columns=rename_dict, inplace=True)
+            grouped.rename(columns={"Club Name": "门店名称"}, inplace=True)
+        else:
+            grouped["门店名称"] = ""
 
         # 计算成长率
         def growth_rate(current, previous):
@@ -411,52 +433,92 @@ def export_optimized_excel(order_file, output_path):
                 return float('inf') if current > 0 else 0
             return (current - previous) / previous * 100
 
-        if 2 in col_map and 3 in col_map:
+        # 检查是否有需要的列来计算成长率
+        if 2 in col_map and 3 in col_map and "units" in col_map[2] and "units" in col_map[3]:
             grouped["Range2-3_成长率"] = grouped.apply(
                 lambda row: growth_rate(row["Range2_销量"], row["Range3_销量"]), 
                 axis=1
             )
-        if 3 in col_map and 4 in col_map:
+        if 3 in col_map and 4 in col_map and "units" in col_map[3] and "units" in col_map[4]:
             grouped["Range3-4_成长率"] = grouped.apply(
                 lambda row: growth_rate(row["Range3_销量"], row["Range4_销量"]), 
                 axis=1
             )
 
-        # 调整列序
-        base_cols = ["Club Nbr", "门店名称", "省份"]
-        sales_cols = [c for c in grouped.columns if c.startswith("Range") and "销量" in c]
+        # 调整列序，按 Range1_销量 降序排序
+        base_cols = ["Club Nbr", "门店名称", "类型", "省份", "ERP"]
+        # 找出所有 Range 列，按数字排序
+        range_cols = [c for c in grouped.columns if c.startswith("Range")]
         growth_cols = [c for c in grouped.columns if "成长率" in c]
-        # 将销量列按 Range 数字排序
-        sales_cols.sort(key=lambda x: int(re.search(r"Range(\d+)", x).group(1)))
-        final_cols = base_cols + sales_cols + growth_cols
+        # 将 Range 列按数字排序
+        range_cols.sort(key=lambda x: int(re.search(r"Range(\d+)", x).group(1)))
+        final_cols = base_cols + range_cols + growth_cols
         grouped = grouped[final_cols]
 
         # 按 Range1_销量 降序排列
         if "Range1_销量" in grouped.columns:
             grouped = grouped.sort_values("Range1_销量", ascending=False)
 
+        # 先保留数值列，用于后面计算总和
+        numeric_cols_store = []
+        for col in grouped.columns:
+            if "门店名称" not in col and "类型" not in col and "省份" not in col and "ERP" not in col:
+                numeric_cols_store.append(col)
+
         # ---------- 省份汇总 ----------
+        # 为每条原始记录添加省份
         df_full["省份"] = df_full["Club Nbr"].apply(lambda x: get_store_info(x)[1])
-        prov_grouped = df_full.groupby("省份", as_index=False).agg(agg_dict)
+        province_agg = {col: "sum" for col in agg_dict.keys()}
+
+        prov_grouped = df_full.groupby("省份", as_index=False).agg(province_agg)
+
+        # 重命名省份汇总列
         prov_grouped.rename(columns=rename_dict, inplace=True)
 
+        # 先创建门店数据的完整副本，用于计算省份内最好最差门店
+        store_for_prov = grouped.copy()
+
+        # 为省份汇总添加最好/最差门店
+        prov_grouped["销量最好门店"] = ""
+        prov_grouped["销量最差门店"] = ""
+        
+        # 计算每个省份的最好和最差门店（基于 Range1_销量）
+        if "Range1_销量" in store_for_prov.columns:
+            for _, prov_row in prov_grouped.iterrows():
+                prov_name = prov_row["省份"]
+                # 筛选该省份的门店
+                prov_stores = store_for_prov[store_for_prov["省份"] == prov_name].copy()
+                if len(prov_stores) > 0:
+                    # 销量最好的门店
+                    best_store = prov_stores.loc[prov_stores["Range1_销量"].idxmax()]
+                    best_name = best_store["门店名称"] if best_store["门店名称"] else best_store["ERP"]
+                    best_units = best_store["Range1_销量"]
+                    # 销量最差的门店
+                    worst_store = prov_stores.loc[prov_stores["Range1_销量"].idxmin()]
+                    worst_name = worst_store["门店名称"] if worst_store["门店名称"] else worst_store["ERP"]
+                    worst_units = worst_store["Range1_销量"]
+                    
+                    # 更新到prov_grouped
+                    prov_grouped.loc[prov_grouped["省份"] == prov_name, "销量最好门店"] = f"{best_name} ({int(best_units)}瓶)"
+                    prov_grouped.loc[prov_grouped["省份"] == prov_name, "销量最差门店"] = f"{worst_name} ({int(worst_units)}瓶)"
+
         # 计算省份成长率
-        if 2 in col_map and 3 in col_map:
+        if 2 in col_map and 3 in col_map and "units" in col_map[2] and "units" in col_map[3]:
             prov_grouped["Range2-3_成长率"] = prov_grouped.apply(
                 lambda row: growth_rate(row["Range2_销量"], row["Range3_销量"]), 
                 axis=1
             )
-        if 3 in col_map and 4 in col_map:
+        if 3 in col_map and 4 in col_map and "units" in col_map[3] and "units" in col_map[4]:
             prov_grouped["Range3-4_成长率"] = prov_grouped.apply(
                 lambda row: growth_rate(row["Range3_销量"], row["Range4_销量"]), 
                 axis=1
             )
 
         # 调整省份汇总列序
-        prov_sales_cols = [c for c in prov_grouped.columns if c.startswith("Range") and "销量" in c]
+        prov_range_cols = [c for c in prov_grouped.columns if c.startswith("Range")]
         prov_growth_cols = [c for c in prov_grouped.columns if "成长率" in c]
-        prov_sales_cols.sort(key=lambda x: int(re.search(r"Range(\d+)", x).group(1)))
-        prov_final_cols = ["省份"] + prov_sales_cols + prov_growth_cols
+        prov_range_cols.sort(key=lambda x: int(re.search(r"Range(\d+)", x).group(1)))
+        prov_final_cols = ["省份"] + prov_range_cols + prov_growth_cols + ["销量最好门店", "销量最差门店"]
         prov_grouped = prov_grouped[prov_final_cols]
 
         # 按 Range1_销量 降序
@@ -470,6 +532,30 @@ def export_optimized_excel(order_file, output_path):
             # 省份汇总 sheet
             prov_grouped.to_excel(writer, sheet_name='省份汇总', index=False)
 
+            # ---------------- 门店汇总 sheet 处理 ----------------
+            ws_store = writer.sheets['门店汇总']
+            
+            # 计算各列总和
+            sum_row = ws_store.max_row + 1
+            # 在第一列写入"总计"
+            ws_store.cell(row=sum_row, column=1, value="总计")
+            ws_store.cell(row=sum_row, column=1).font = Font(bold=True)
+            ws_store.cell(row=sum_row, column=1).alignment = Alignment(horizontal='left', vertical='center')
+            
+            # 为数值列计算总和
+            for col_idx, col_name in enumerate(grouped.columns, start=1):
+                if col_name in numeric_cols_store and col_name != "Club Nbr" and "成长率" not in col_name:
+                    # 计算该列总和（跳过表头）
+                    col_letter = get_column_letter(col_idx)
+                    total = 0
+                    for row in range(2, ws_store.max_row):  # max_row此时还没加sum_row
+                        cell_val = ws_store.cell(row=row, column=col_idx).value
+                        if isinstance(cell_val, (int, float)):
+                            total += cell_val
+                    ws_store.cell(row=sum_row, column=col_idx, value=total)
+                    ws_store.cell(row=sum_row, column=col_idx).font = Font(bold=True)
+                    ws_store.cell(row=sum_row, column=col_idx).alignment = Alignment(horizontal='right', vertical='center')
+            
             # 格式化函数
             def format_sheet(ws, df):
                 # 标题行加粗居中
@@ -499,7 +585,7 @@ def export_optimized_excel(order_file, output_path):
                     ws.column_dimensions[col_letter].width = adjusted_width
                     
                     # 判断对齐
-                    if any(kw in col_name for kw in ['销量', '成长率', 'Nbr']):
+                    if any(kw in col_name for kw in ['销量', '销售额', '库存', '在途', '成长率', 'Nbr']):
                         align = 'right'
                     else:
                         align = 'left'
